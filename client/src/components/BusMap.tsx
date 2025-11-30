@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import { Search, Plus, Minus, Navigation } from "lucide-react";
@@ -113,7 +113,7 @@ function MapControls() {
 
 export default function BusMap({ routeId, selectedStop, showAllBuses = false, role = "student" }: BusMapProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [busLocations, setBusLocations] = useState<Map<string, LocationUpdate>>(new Map());
+  const [busLocations, setBusLocations] = useState<LocationUpdate[]>([]);
   const [isMissed, setIsMissed] = useState(false);
 
   const { data: routeData } = useQuery<RouteWithStops>({
@@ -123,33 +123,34 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
   const handleLocationUpdate = useCallback((location: LocationUpdate) => {
     setBusLocations(prev => {
-      const updated = new Map(prev);
-      updated.set(location.tripId, location);
-      return updated;
+      const index = prev.findIndex(l => l.tripId === location.tripId);
+      if (index >= 0) {
+        const updated = [...prev];
+        updated[index] = location;
+        return updated;
+      }
+      return [...prev, location];
     });
   }, []);
 
   const handleBusOffline = useCallback((tripId: string) => {
-    setBusLocations(prev => {
-      const updated = new Map(prev);
-      updated.delete(tripId);
-      return updated;
-    });
+    setBusLocations(prev => prev.filter(l => l.tripId !== tripId));
   }, []);
 
-  const { isConnected, locations: wsLocations } = useWebSocket({
-    role: role === "admin" ? "admin" : "student",
-    routeId: showAllBuses ? undefined : routeId,
-    onLocationUpdate: handleLocationUpdate,
-    onBusOffline: handleBusOffline,
-  });
+  const wsOptions = useMemo(
+    () => ({
+      role: role === "admin" ? "admin" as const : "student" as const,
+      routeId: showAllBuses ? undefined : routeId,
+      onLocationUpdate: handleLocationUpdate,
+      onBusOffline: handleBusOffline,
+    }),
+    [role, showAllBuses, routeId, handleLocationUpdate, handleBusOffline]
+  );
+
+  const { isConnected, locations: wsLocations } = useWebSocket(wsOptions);
 
   useEffect(() => {
-    const initialLocations = new Map<string, LocationUpdate>();
-    wsLocations.forEach(loc => {
-      initialLocations.set(loc.tripId, loc);
-    });
-    setBusLocations(initialLocations);
+    setBusLocations(wsLocations);
   }, [wsLocations]);
 
   const selectedStopData = routeData?.stops.find((s) => s.name === selectedStop);
@@ -164,12 +165,15 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     }
   }, [selectedStopData]);
 
-  const routeCoordinates = routeData?.stops.map((s) => [s.lat, s.lng] as [number, number]) || [];
+  const routeCoordinates = useMemo(
+    () => routeData?.stops.map((s) => [s.lat, s.lng] as [number, number]) || [],
+    [routeData?.stops]
+  );
 
-  const calculateETA = () => {
-    if (!selectedStopData || busLocations.size === 0) return null;
+  const calculateETA = useCallback(() => {
+    if (!selectedStopData || busLocations.length === 0) return null;
     
-    const busLocation = Array.from(busLocations.values())[0];
+    const busLocation = busLocations[0];
     if (!busLocation) return null;
 
     const distance = Math.sqrt(
@@ -177,7 +181,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       Math.pow(busLocation.lng - selectedStopData.lng, 2)
     );
     return Math.max(1, Math.round(distance * 500));
-  };
+  }, [selectedStopData, busLocations]);
 
   const eta = calculateETA();
 
@@ -270,7 +274,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
           </>
         )}
 
-        {Array.from(busLocations.values()).map((location) => (
+        {busLocations.map((location) => (
           <Marker
             key={location.tripId}
             position={[location.lat, location.lng]}
