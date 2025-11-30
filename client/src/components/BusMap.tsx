@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import { Search, Plus, Minus, Navigation } from "lucide-react";
@@ -113,7 +113,6 @@ function MapControls() {
 
 export default function BusMap({ routeId, selectedStop, showAllBuses = false, role = "student" }: BusMapProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [busLocations, setBusLocations] = useState<LocationUpdate[]>([]);
   const [isMissed, setIsMissed] = useState(false);
 
   const { data: routeData } = useQuery<RouteWithStops>({
@@ -121,37 +120,10 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     enabled: !!routeId,
   });
 
-  const handleLocationUpdate = useCallback((location: LocationUpdate) => {
-    setBusLocations(prev => {
-      const index = prev.findIndex(l => l.tripId === location.tripId);
-      if (index >= 0) {
-        const updated = [...prev];
-        updated[index] = location;
-        return updated;
-      }
-      return [...prev, location];
-    });
-  }, []);
-
-  const handleBusOffline = useCallback((tripId: string) => {
-    setBusLocations(prev => prev.filter(l => l.tripId !== tripId));
-  }, []);
-
-  const wsOptions = useMemo(
-    () => ({
-      role: role === "admin" ? "admin" as const : "student" as const,
-      routeId: showAllBuses ? undefined : routeId,
-      onLocationUpdate: handleLocationUpdate,
-      onBusOffline: handleBusOffline,
-    }),
-    [role, showAllBuses, routeId, handleLocationUpdate, handleBusOffline]
-  );
-
-  const { isConnected, locations: wsLocations } = useWebSocket(wsOptions);
-
-  useEffect(() => {
-    setBusLocations(wsLocations);
-  }, [wsLocations]);
+  const { isConnected, locations } = useWebSocket({
+    role: role === "admin" ? "admin" : "student",
+    routeId: showAllBuses ? undefined : routeId,
+  });
 
   const selectedStopData = routeData?.stops.find((s) => s.name === selectedStop);
 
@@ -165,23 +137,18 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     }
   }, [selectedStopData]);
 
-  const routeCoordinates = useMemo(
-    () => routeData?.stops.map((s) => [s.lat, s.lng] as [number, number]) || [],
-    [routeData?.stops]
-  );
+  const routeCoordinates = routeData?.stops.map((s) => [s.lat, s.lng] as [number, number]) || [];
 
-  const calculateETA = useCallback(() => {
-    if (!selectedStopData || busLocations.length === 0) return null;
+  const calculateETA = () => {
+    if (!selectedStopData || locations.length === 0) return null;
     
-    const busLocation = busLocations[0];
-    if (!busLocation) return null;
-
+    const busLocation = locations[0];
     const distance = Math.sqrt(
       Math.pow(busLocation.lat - selectedStopData.lat, 2) +
       Math.pow(busLocation.lng - selectedStopData.lng, 2)
     );
     return Math.max(1, Math.round(distance * 500));
-  }, [selectedStopData, busLocations]);
+  };
 
   const eta = calculateETA();
 
@@ -274,7 +241,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
           </>
         )}
 
-        {busLocations.map((location) => (
+        {locations.map((location) => (
           <Marker
             key={location.tripId}
             position={[location.lat, location.lng]}
@@ -283,9 +250,11 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
             <Popup>
               <strong>Live Bus Location</strong>
               <br />
-              Route ID: {location.routeId}
+              Route: {location.routeId}
               <br />
-              <span className="text-green-600">Tracking live</span>
+              Bus: {location.busId}
+              <br />
+              <span className="text-green-600">Live tracking</span>
             </Popup>
           </Marker>
         ))}
