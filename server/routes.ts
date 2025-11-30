@@ -159,10 +159,10 @@ async function seedDatabase() {
         await storage.createDriver({ userId: driverUser.id, licenseNumber: "KA25-DL-12345", assignedBusId: buses[0].id });
       }
 
-      const studentUser = await storage.createUser({ username: "2JI20CS001", password: "student123", role: "student", name: "Rahul Kumar" });
+      const studentUser = await storage.createUser({ username: "2JH23CS001", password: "student123", role: "student", name: "Rahul Kumar" });
       const routes = await storage.getRoutes();
       if (routes.length > 0) {
-        await storage.createStudent({ userId: studentUser.id, usn: "2JI20CS001", preferredRouteId: routes[0].id, preferredStop: "keshwapur circle" });
+        await storage.createStudent({ userId: studentUser.id, usn: "2JH23CS001", preferredRouteId: routes[0].id, preferredStop: "keshwapur circle" });
       }
       console.log("Demo users created!");
     }
