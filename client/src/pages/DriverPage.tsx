@@ -91,19 +91,7 @@ export default function DriverPage({ userName, driverId, assignedBusId, onLogout
   };
 
   return (
-    <div
-      className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900"
-      style={activeNav !== "routes" ? {
-        backgroundImage: `url(${backgroundImage})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundAttachment: "fixed",
-      } : undefined}
-    >
-      {activeNav !== "routes" ? (
-        <div className="absolute inset-0 bg-white/85 dark:bg-gray-900/85" />
-      ) : null}
-      
+    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         <AppHeader 

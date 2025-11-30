@@ -37,17 +37,7 @@ export default function AdminPage({ userName, onLogout }: AdminPageProps) {
   }
 
   return (
-    <div
-      className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900"
-      style={{
-        backgroundImage: `url(${backgroundImage})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundAttachment: "fixed",
-      }}
-    >
-      <div className="absolute inset-0 bg-white/85 dark:bg-gray-900/85" />
-      
+    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         <AppHeader userName={userName} userRole="admin" onLogout={onLogout} />
