@@ -53,7 +53,7 @@ export default function StudentPage({ userName, onLogout }: StudentPageProps) {
       case "map":
         if (selectedRoute && selectedStop) {
           return (
-            <div className="flex-1 relative">
+            <div className="relative" style={{ flex: 1, height: "calc(100vh - 200px)" }}>
               <Button
                 size="icon"
                 variant="ghost"

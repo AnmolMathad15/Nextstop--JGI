@@ -153,7 +153,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
   const eta = calculateETA();
 
   return (
-    <div className="relative h-full w-full" data-testid="bus-map">
+    <div className="relative w-full" style={{ height: "100vh", minHeight: "100vh" }} data-testid="bus-map">
       {isMissed && routeData && selectedStopData && (
         <div className="absolute top-4 left-4 right-4 z-[1000]">
           <MissedBusAlert
@@ -206,7 +206,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       <MapContainer
         center={[HUBLI_CENTER.lat, HUBLI_CENTER.lng]}
         zoom={13}
-        className="h-full w-full"
+        style={{ width: "100%", height: "100%" }}
         zoomControl={false}
       >
         <TileLayer
