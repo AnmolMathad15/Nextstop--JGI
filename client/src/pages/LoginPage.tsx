@@ -25,8 +25,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         backgroundAttachment: "fixed",
       }}
     >
-      <div className="fixed inset-0 bg-white/40 dark:bg-black/40" />
-      
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         
