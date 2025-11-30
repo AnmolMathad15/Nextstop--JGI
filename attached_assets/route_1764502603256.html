@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NextStop JGI — Routes</title>
+
+  <!-- Fonts + Tailwind CDN -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- “Stanely” isn’t on Google Fonts; using a bold display face (Staatliches) as a close match, with your original Stalinist One as fallback -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&family=Staatliches&family=Stalinist+One&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+  <style>
+    :root{
+      --bg-start: #f7fbff;
+      --bg-end: #fff9f2;
+      --muted: #6b7280;
+      --accent-blue: #3b82f6;
+      --accent-cyan: #06b6d4;
+      --accent-green: #10b981;
+      --glass: rgba(255,255,255,0.7);
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: radial-gradient(1200px 600px at 10% -10%, #eef6ff 10%, transparent 70%) fixed,
+                  radial-gradient(800px 500px at 110% 20%, #fff4e6 10%, transparent 60%) fixed,
+                  linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+      color: #0f172a;
+    }
+
+    /* header */
+    .logo-wrap {
+      background: white; border-radius: 999px; padding:.28rem;
+      box-shadow: 0 10px 26px rgba(15,23,42,.08); display:inline-flex;
+      width: 54px; height: 54px; overflow: hidden; position: relative;
+    }
+    /* Show only emblem area (circular mask + zoom) */
+    .app-logo {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      object-position: center; /* If your emblem sits off-center, tell me where and I’ll adjust */
+      transform: scale(1.25);
+      border-radius: 999px;
+    }
+
+    /* Stanely-style headline (using Staatliches as primary, Stalinist One as fallback) */
+    .font-stanely { font-family: "Staatliches", "Stalinist One", "Poppins", sans-serif; letter-spacing: .5px; }
+
+    /* route card visuals */
+    .route-card {
+      border-radius: 16px; overflow: hidden; position: relative;
+      transition: transform .28s cubic-bezier(.2,.9,.2,1), box-shadow .28s, background .3s ease;
+      background:
+        radial-gradient(120px 80px at 100% 0%, rgba(255,255,255,.75), transparent 60%),
+        linear-gradient(135deg, rgba(255,255,255,.9), rgba(255,255,255,.88));
+      box-shadow: 0 10px 28px rgba(13,38,59,.10);
+      backdrop-filter: blur(2px);
+      border: 1px solid rgba(255,255,255,.6);
+    }
+    .route-card:hover { transform: translateY(-6px); box-shadow: 0 18px 40px rgba(13,38,59,.15); }
+
+    /* colorful skins per-card via CSS variables */
+    .skin {
+      --c1:#60a5fa; --c2:#3b82f6; --bgA:#eaf2ff; --bgB:#f1f6ff;
+      background:
+        radial-gradient(130px 120px at 0% 0%, var(--bgA), transparent 70%),
+        radial-gradient(160px 140px at 100% 100%, var(--bgB), transparent 70%),
+        linear-gradient(135deg, rgba(255,255,255,.92), rgba(255,255,255,.86));
+    }
+    .skin.green { --c1:#34d399; --c2:#10b981; --bgA:#eafff5; --bgB:#f2fff9; }
+    .skin.orange { --c1:#f59e0b; --c2:#f97316; --bgA:#fff3e6; --bgB:#fff7ee; }
+    .skin.pinkviolet { --c1:#8b5cf6; --c2:#ec4899; --bgA:#f6e9ff; --bgB:#ffe9f4; }
+    .skin.teal { --c1:#06b6d4; --c2:#14b8a6; --bgA:#e8fbff; --bgB:#eafffb; }
+    .skin.sunset { --c1:#fb7185; --c2:#fb923c; --bgA:#fff0f2; --bgB:#fff4e9; }
+
+    .accent-bar { width:6px; border-top-left-radius:16px; border-bottom-left-radius:16px; background: linear-gradient(180deg,var(--c1),var(--c2)); }
+
+    /* chevron rotation */
+    .chev { transition: transform .25s ease; transform-origin: center; }
+    .chev.open { transform: rotate(180deg); }
+
+    /* collapse animation */
+    .route-content { max-height: 0; overflow: hidden; transition: max-height .32s ease, opacity .28s ease; opacity: 0; }
+    .route-content.open { opacity: 1; }
+
+    /* stop chips */
+    .stop-chip {
+      background: rgba(15,23,42,.04); padding:.45rem .65rem; border-radius:10px; font-size:.95rem; color:#0f172a;
+      transition: transform .18s ease, background .18s ease, color .18s ease; cursor: default;
+    }
+    .stop-chip:hover { transform: translateX(6px); background: rgba(255,255,255,.15); color: #032b55; }
+    .stop-chip.jcet {
+      background: linear-gradient(90deg,#e6f0ff,#dbeafe); color:#0b4aa6; font-weight:600;
+      box-shadow: 0 8px 20px rgba(59,130,246,.12); border:1px solid rgba(59,130,246,.12);
+    }
+
+    /* floating shapes (subtle) */
+    .orb { position:absolute; border-radius:50%; filter: blur(34px); opacity:.16; pointer-events:none; }
+
+    /* tiny cute animated sparkles in cards */
+    .sparkle {
+      position:absolute; width:8px; height:8px; border-radius:50%;
+      background: linear-gradient(135deg, var(--c1), var(--c2));
+      opacity:.75; animation: floaty 4.5s ease-in-out infinite;
+      box-shadow: 0 0 12px rgba(0,0,0,.08);
+    }
+    .sparkle.s1 { top:12px; right:18px; animation-delay: .2s; }
+    .sparkle.s2 { bottom:14px; left:16px; width:6px; height:6px; animation-delay: .9s; }
+    .sparkle.s3 { top:40%; left:8px; width:7px; height:7px; animation-delay: 1.4s; }
+
+    @keyframes floaty {
+      0%,100% { transform: translateY(0) translateX(0) scale(1); opacity:.65; }
+      50% { transform: translateY(-6px) translateX(3px) scale(1.1); opacity:1; }
+    }
+
+    /* corner shapes */
+    .corner-shape {
+      position:absolute; width:72px; height:72px; border-top-right-radius:16px;
+      right:0; top:0; opacity:.12; filter: blur(1px);
+      background: radial-gradient(60px 60px at 60px 12px, var(--c1), transparent 60%);
+      pointer-events: none;
+    }
+    .corner-shape.bl { right:auto; left:0; top:auto; bottom:0;
+      border-top-right-radius:0; border-bottom-left-radius:16px;
+      background: radial-gradient(60px 60px at 12px 60px, var(--c2), transparent 60%);
+    }
+
+    /* small animations for card entrance */
+    .fade-up { opacity:0; transform: translateY(10px); transition: opacity .45s ease, transform .45s cubic-bezier(.2,.9,.2,1); }
+    .fade-up.visible { opacity:1; transform: translateY(0); }
+
+    /* moving greeting pill */
+    .ticker {
+      position: relative; overflow: hidden; border-radius: 999px;
+      background: white; border: 1px solid rgba(255,255,255,.7);
+    }
+    .ticker-track {
+      display: inline-flex; gap: 2rem; white-space: nowrap; padding-block: .6rem; padding-inline: 1rem;
+      animation: tickerMove 14s linear infinite;
+      font-weight: 600;
+    }
+    @keyframes tickerMove {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* back-to-top */
+    .back-top {
+      position: fixed; right: 18px; bottom: 88px;
+      background: linear-gradient(90deg,#3b82f6,#06b6d4); color:white; width:44px; height:44px;
+      display:grid; place-items:center; border-radius:10px; box-shadow: 0 12px 30px rgba(3,105,161,.14); cursor:pointer;
+      transition: transform .18s ease, opacity .18s;
+    }
+
+    @media (min-width: 900px) {
+      main { max-width: 980px; margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="min-h-screen flex flex-col">
+
+<!-- Ribbon Bar -->
+<div class="w-full bg-gradient-to-r from-teal-600 to-blue-700 text-white py-4 overflow-hidden">
+  <div class="ribbon-text flex items-center gap-6">
+    <img src="jgilogo.jpg" alt="JGI Logo" class="h-12 w-12 rounded-full"/>
+    <span class="font-bold tracking-wide text-2xl">JAIN COLLEGE OF ENGINEERING AND TECHNOLOGY,HUBBALLI</span>
+  </div>
+</div>
+
+
+    <!-- floating decorative orbs -->
+    <div aria-hidden="true" class="absolute inset-0 -z-10">
+      <div class="orb" style="width:260px;height:260px;left:-60px;top:40px;background:linear-gradient(90deg,#dbeafe,#c7d2fe);"></div>
+      <div class="orb" style="width:220px;height:220px;right:-40px;top:120px;background:linear-gradient(90deg,#ecfccb,#bbf7d0);"></div>
+      <div class="orb" style="width:180px;height:180px;left:60%;top:60%;background:linear-gradient(90deg,#fbcfe8,#fbe7c6);"></div>
+    </div>
+
+    <!-- header -->
+    <header class="sticky top-0 z-30 bg-white/70 backdrop-blur-md border-b border-white/40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-between gap-4 py-4">
+          <div class="flex items-center gap-3">
+            <div class="logo-wrap">
+              <!-- Your own logo, masked/zoomed to show emblem -->
+              <img src="logo.jpg" alt="NextStop JGI Logo" class="app-logo"
+                   onerror="this.onerror=null;this.src='https://lh3.googleusercontent.com/aida-public/AB6AXuB2vaDBk79_ZZ0jukC8u6zSCfwBGfMExnNwBjrWdlfaOgKT3vUX9ZO0DJgcRhVWt3tJnKOpa1khwNCiPOH8qUmN2W1DiZuGYcTlOPfTqwxIRJTDXA4eTrB5LUa7h4hG4pnqeZvqAzisMcqRaIpRg6bcvho5xYtVMLBu3QB236arQpx20eqVx0KztixjpbZ1fLD6xAsK-0PWbF-TWMtki4bRYMOwFjFpPr6HH-jb6oSnUUJrcM9mMm4hv52Odl0ZWBkw78WQ5MYlWkAG';">
+            </div>
+            <div>
+              <div class="text-[11px] text-gray-600">Welcome</div>
+              <div class="text-xl font-stanely leading-5">Welcome to NextStop JGI</div>
+            </div>
+          </div>
+
+          <div class="text-right">
+            <div class="text-sm text-gray-600">Your Daily Ride Made Simple 🎓</div>
+            <div class="text-xs text-gray-400">JCET College • Student Transport</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- main -->
+    <main class="flex-1 w-full px-4 py-6">
+      <div class="max-w-7xl mx-auto">
+
+        <!-- top row: search + quick actions -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center mb-6">
+          <div class="md:col-span-2">
+            <div class="relative">
+              <input id="search" type="search" placeholder="Search route or stop (e.g. 'Unkal Lake' )"
+                     class="w-full rounded-xl border border-white/40 bg-white/80 backdrop-blur-sm px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              />
+              <div class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">🔎</div>
+            </div>
+          </div>
+
+          <div class="flex gap-2 justify-end">
+            <button id="open-all" class="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm">Open all</button>
+            <button id="close-all" class="px-3 py-2 rounded-lg bg-white text-gray-700 border shadow-sm">Close all</button>
+          </div>
+        </div>
+
+        <!-- moving greeting / ticker -->
+        <div class="ticker mb-5 shadow-sm">
+          <div class="ticker-track">
+            <span>🎉 Welcome to NextStop JGI — Happy commuting! 🚍</span>
+            <span>🗺️ Choose your route below • Live location coming soon ✨</span>
+            <span>🔔 Get alerts when your bus is near your stop ❤️</span>
+            <span>🎉 Welcome to NextStop JGI — Happy commuting! 🚍</span>
+            <span>🗺️ Choose your route below • Live location coming soon ✨</span>
+            <span>🔔 Get alerts when your bus is near your stop ❤️</span>
+          </div>
+        </div>
+
+        <!-- routes list -->
+        <section id="routesList" class="space-y-5">
+
+          <!-- Keshwapur -->
+          <article class="route-card skin fade-up" style="--c1:#60a5fa;--c2:#3b82f6;--bgA:#eaf2ff;--bgB:#f1f6ff;" data-name="keshwapur" data-stops="Shakti Colony,Sub jail,Lions School,Venkatesh Colony,Madhura Colony,keshwapur circle,GopanKoppa,JK School,Sainagar last stop,JCET College">
+            <div class="accent-bar"></div>
+            <div class="corner-shape"></div><div class="corner-shape bl"></div>
+            <div class="sparkle s1"></div><div class="sparkle s2"></div><div class="sparkle s3"></div>
+
+            <div class="flex-1 p-4">
+              <div class="flex items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold"><span aria-hidden="true">🚌</span> Keshwapur</h3>
+                    <div class="ml-1 px-2 py-0.5 text-xs rounded-full text-white" style="background:linear-gradient(90deg,var(--c1),var(--c2))">10 stops</div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-1">Neighborhood route covering Keshwapur area</p>
+                </div>
+
+                <button class="chev-btn" data-target="keshwapurContent" aria-expanded="false" aria-controls="keshwapurContent" title="Toggle">
+                  <svg class="chev h-6 w-6 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div id="keshwapurContent" class="route-content px-1 pt-3" aria-hidden="true">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="stop-chip">Shakti Colony   - 7:25am/9:25am</div>
+                  <div class="stop-chip">Sub jail   - 7:27am/9:27am</div>
+                  <div class="stop-chip">Lions School   - 7:30am/9:30am</div>
+                  <div class="stop-chip">Venkatesh Colony  - 7:34am/9:34am</div>
+                  <div class="stop-chip">Madhura Colony  - 7:46am/9:46am</div>
+                  <div class="stop-chip">keshwapur circle  - 7:50am/9:50am</div>
+                  <div class="stop-chip">GopanKoppa  - 7:58am/9:58am</div>
+                  <div class="stop-chip">JK School  - 8:03am/10:03am</div>
+                  <div class="stop-chip">Sainagar last stop  - 8:09am/10:09am</div>
+                  <div class="stop-chip jcet">JCET College  - 8:15am/10:15am</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- PG -->
+          <article class="route-card skin green fade-up" data-name="pg" data-stops="Tolankeri,Akshay Colony Petrol Pump,PG (Focusmart),Siddeshwar Park,Lingaraj Nagar,Adarsh College,Unkal Lake,President Hotel,Sainagar last stop,JCET College">
+            <div class="accent-bar"></div>
+            <div class="corner-shape"></div><div class="corner-shape bl"></div>
+            <div class="sparkle s1"></div><div class="sparkle s2"></div><div class="sparkle s3"></div>
+
+            <div class="flex-1 p-4">
+              <div class="flex items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold"><span aria-hidden="true">🏠</span> PG</h3>
+                    <div class="ml-1 px-2 py-0.5 text-xs rounded-full text-white" style="background:linear-gradient(90deg,var(--c1),var(--c2))">12 stops</div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-1">Popular PG route</p>
+                </div>
+
+                <button class="chev-btn" data-target="pgContent" aria-expanded="false" aria-controls="pgContent" title="Toggle">
+                  <svg class="chev h-6 w-6 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div id="pgContent" class="route-content px-1 pt-3" aria-hidden="true">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="stop-chip">Tolankeri-7:50am/9:50am</div>
+                  <div class="stop-chip">Akshay Colony Petrol Pump-7:53am/9:53am</div>
+                  <div class="stop-chip">PG (Focusmart)-7:55am/9:55am</div>
+                  <div class="stop-chip">Siddeshwar Park-7:59am/9:59am</div>
+                  <div class="stop-chip">Lingaraj Nagar -8:01am/10:01am</div>
+                  <div class="stop-chip">Adarsh College- 8:03am/10:03am</div>
+                  <div class="stop-chip">Unkal Lake-8:05am/10:05am</div>
+                  <div class="stop-chip">President Hotel-8:07am/10:07am</div>
+                  <div class="stop-chip">Sainagar last stop-8:10am/10:10am</div>
+                  <div class="stop-chip jcet">JCET College-8:15am/10:15am</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Siddaroodh Math -->
+          <article class="route-card skin orange fade-up" data-name="siddaroodh" data-stops="Nehru Nagar Tank,Manjunath Nagar Cross,Anand Nagar,Siddaroodh Math,Murdeshwar Ceramics,Akshay Park Petrol Bunk,Ravi Nagar,Siddeshwar Park,Lingaraj Nagar,Adarsh College,Unkal Lake,President Hotel,Sainagar last stop,JCET College">
+            <div class="accent-bar"></div>
+            <div class="corner-shape"></div><div class="corner-shape bl"></div>
+            <div class="sparkle s1"></div><div class="sparkle s2"></div><div class="sparkle s3"></div>
+
+            <div class="flex-1 p-4">
+              <div class="flex items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold"><span aria-hidden="true">🛕</span> Siddaroodh Math</h3>
+                    <div class="ml-1 px-2 py-0.5 text-xs rounded-full text-white" style="background:linear-gradient(90deg,var(--c1),var(--c2))">14 stops</div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-1">Covers central residential areas</p>
+                </div>
+
+                <button class="chev-btn" data-target="siddaroodhContent" aria-expanded="false" aria-controls="siddaroodhContent" title="Toggle">
+                  <svg class="chev h-6 w-6 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div id="siddaroodhContent" class="route-content px-1 pt-3" aria-hidden="true">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="stop-chip">Nehru Nagar Tank-7:25am/9:25am</div>
+                  <div class="stop-chip">Manjunath Nagar Cross-7:27am/9:27am</div>
+                  <div class="stop-chip">Anand Nagar -7:34am/9:34am</div>
+                  <div class="stop-chip">Siddaroodh Math-7:40am/9:40am</div>
+                  <div class="stop-chip">Murdeshwar Ceramics-7:42am/9:42am</div>
+                  <div class="stop-chip">Akshay Park Petrol Bunk-7:45am/9:45am</div>
+                  <div class="stop-chip">Ravi Nagar-7:47am/9:47am</div>
+                  <div class="stop-chip">Siddeshwar Park-8:00am/10:am</div>
+                  <div class="stop-chip">Lingaraj Nagar-8:01am/10:01am</div>
+                  <div class="stop-chip">Adarsh College- 8:03am/10:03am</div>
+                  <div class="stop-chip">Unkal Lake-8:05am/10:05am</div>
+                  <div class="stop-chip">President Hotel-8:07am/10:07am</div>
+                  <div class="stop-chip">Sainagar last stop-8:10am/10:10am</div>
+                  <div class="stop-chip jcet">JCET College-8:15am/10:15am</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Gadag (BVB) -->
+          <article class="route-card skin pinkviolet fade-up" data-name="gadag" data-stops="Head Post Office,Corporation,Old Busstand,Canara Hotel Hosur Circle,KMC Stop,Gurudatta Bhavan,Arts College,BVB College,Unkal Cross,Siddappa Ajja Temple old,President Hotel,Sainagar last stop,JCET College">
+            <div class="accent-bar"></div>
+            <div class="corner-shape"></div><div class="corner-shape bl"></div>
+            <div class="sparkle s1"></div><div class="sparkle s2"></div><div class="sparkle s3"></div>
+
+            <div class="flex-1 p-4">
+              <div class="flex items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold"><span aria-hidden="true">🏫</span> Gadag (BVB)</h3>
+                    <div class="ml-1 px-2 py-0.5 text-xs rounded-full text-white" style="background:linear-gradient(90deg,var(--c1),var(--c2))">13 stops</div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-1">BVB / Gadag route</p>
+                </div>
+
+                <button class="chev-btn" data-target="gadagContent" aria-expanded="false" aria-controls="gadagContent" title="Toggle">
+                  <svg class="chev h-6 w-6 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div id="gadagContent" class="route-content px-1 pt-3" aria-hidden="true">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="stop-chip">Head Post Office -7:45am/9:45am</div>
+                  <div class="stop-chip">Corporation-7:50am/9:50am</div>
+                  <div class="stop-chip">Old Busstand-7:52am/9:52am</div>
+                  <div class="stop-chip">Canara Hotel Hosur Circle- 7:56am/9:56am</div>
+                  <div class="stop-chip">KMC Stop-7:58am/9:58am</div>
+                  <div class="stop-chip">Gurudatta Bhavan- 8:00am/10:00am</div>
+                  <div class="stop-chip">Arts College -8:02am/10:02am</div>
+                  <div class="stop-chip">BVB College- 8:05am/10:05am</div>
+                  <div class="stop-chip">Unkal Cross -8:07am/10:07am</div>
+                  <div class="stop-chip">Siddappa Ajja Temple old-8:10am/10:10am</div>
+                  <div class="stop-chip">President Hotel-8:12am/10:12am</div>
+                  <div class="stop-chip">Sainagar last stop-8:14am/10:14am</div>
+                  <div class="stop-chip jcet">JCET College-8:15am/10:15am</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Dharwad -->
+          <article class="route-card skin teal fade-up" data-name="dharwad" data-stops="Srinagar Dharwad,Saptapur Well,Dasanakoppa Circle,Jubilee Circle,NTTF,Toll Naka,JSS College,Gandhinagar,SDM Dental College,Rayapur RTO,Navnagar,APMC,Bairidevarakoppa,President Hotel,Sainagar last stop,JCET College">
+            <div class="accent-bar"></div>
+            <div class="corner-shape"></div><div class="corner-shape bl"></div>
+            <div class="sparkle s1"></div><div class="sparkle s2"></div><div class="sparkle s3"></div>
+
+            <div class="flex-1 p-4">
+              <div class="flex items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold"><span aria-hidden="true">🌆</span> Dharwad</h3>
+                    <div class="ml-1 px-2 py-0.5 text-xs rounded-full text-white" style="background:linear-gradient(90deg,var(--c1),var(--c2))">18 stops</div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-1">Long route covering major stops</p>
+                </div>
+
+                <button class="chev-btn" data-target="dharwadContent" aria-expanded="false" aria-controls="dharwadContent" title="Toggle">
+                  <svg class="chev h-6 w-6 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div id="dharwadContent" class="route-content px-1 pt-3" aria-hidden="true">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="stop-chip">Srinagar Dharwad -7:25am/9:25am</div>
+                  <div class="stop-chip">Saptapur Well-7:27am/9:27am</div>
+                  <div class="stop-chip">Dasanakoppa Circle-7:30am/9:30am</div>
+                  <div class="stop-chip">Jubilee Circle-7:35am/9:35am</div>
+                  <div class="stop-chip">NTTF-7:37am/9:37am</div>
+                  <div class="stop-chip">Toll Naka-7:39am/9:39am</div>
+                  <div class="stop-chip">JSS College-7:41am/9:41am</div>
+                  <div class="stop-chip">Gandhinagar-7:43am/9:43am</div>
+                  <div class="stop-chip">SDM Dental College-7:48am/9:48am</div>
+                  <div class="stop-chip">Rayapur RTO-7:51am/9:51am</div>
+                  <div class="stop-chip">Navanagar- 7:53am/9:53am</div>
+                  <div class="stop-chip">APMC- 7:55am/9:55am</div>
+                  <div class="stop-chip">Bairidevarakoppa -7:58am/9:58am</div>
+                  <div class="stop-chip">President Hotel-8:00am/10:00am</div>
+                  <div class="stop-chip">Sainagar last stop-8:05am/10:00am</div>
+                  <div class="stop-chip jcet">JCET College-8:15am/10:15am</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Navanagar -->
+          <article class="route-card skin sunset fade-up" data-name="Navanagar" data-stops="Navnagar,APMC,Bairidevarakoppa,President Hotel,Sainagar last stop,JCET College">
+            <div class="accent-bar"></div>
+            <div class="corner-shape"></div><div class="corner-shape bl"></div>
+            <div class="sparkle s1"></div><div class="sparkle s2"></div><div class="sparkle s3"></div>
+
+            <div class="flex-1 p-4">
+              <div class="flex items-start gap-4">
+                <div class="flex-1">
+                  <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-semibold"><span aria-hidden="true">🏘️</span> Navanagar</h3>
+                    <div class="ml-1 px-2 py-0.5 text-xs rounded-full text-white" style="background:linear-gradient(90deg,var(--c1),var(--c2))">6 stops</div>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-1">Short local route</p>
+                </div>
+
+                <button class="chev-btn" data-target="navanagarContent" aria-expanded="false" aria-controls="navanagarContent" title="Toggle">
+                  <svg class="chev h-6 w-6 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <div id="navanagarContent" class="route-content px-1 pt-3" aria-hidden="true">
+                <div class="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="stop-chip">Navanagar- 7:53am/9:53am</div>
+                  <div class="stop-chip">APMC- 7:55am/9:55am</div>
+                  <div class="stop-chip">Bairidevarakoppa -7:58am/9:58am</div>
+                  <div class="stop-chip">President Hotel-8:00am/10:00am</div>
+                  <div class="stop-chip">Sainagar last stop-8:05am/10:00am</div>
+                  <div class="stop-chip jcet">JCET College-8:15am/10:15am</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+        </section>
+      </div>
+    </main>
+
+    <!-- bottom nav -->
+    <nav class="sticky bottom-0 z-40 bg-white/90 backdrop-blur-md border-t border-white/40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex items-center justify-around gap-6 py-3">
+          <button class="nav-item active flex flex-col items-center gap-1" data-view="home">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M3 9.5 12 3l9 6.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 17.5v-8z"/></svg>
+            <span class="text-xs">Home</span>
+          </button>
+
+          <button class="nav-item flex flex-col items-center gap-1" data-view="routes">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M3 7h18M7 21V7"/></svg>
+            <span class="text-xs">Routes</span>
+          </button>
+
+          <button class="nav-item flex flex-col items-center gap-1" data-view="map">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M9 20l-5-2V6l5 2 8-3 5 2v10l-5-2-8 3z"/></svg>
+            <span class="text-xs">Map</span>
+          </button>
+
+          <button class="nav-item flex flex-col items-center gap-1" data-view="profile">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z"/><path d="M3 21v-2a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v2"/></svg>
+            <span class="text-xs">Profile</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- back to top -->
+    <div id="backTop" class="back-top hidden" title="Back to top" aria-hidden="true">
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg>
+    </div>
+  </div>
+
+  <!-- JS -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Fade-up entrance for cards (staggered)
+      document.querySelectorAll('.fade-up').forEach((el, i) => {
+        setTimeout(()=> el.classList.add('visible'), 80 * i);
+      });
+
+      // Collapsible route logic (multiple-open allowed)
+      const chevs = document.querySelectorAll('.chev-btn');
+      chevs.forEach(btn => {
+        const targetId = btn.dataset.target;
+        const content = document.getElementById(targetId);
+        const chev = btn.querySelector('.chev');
+
+        btn.setAttribute('role','button');
+        btn.setAttribute('tabindex','0');
+
+        const toggle = () => {
+          const open = content.classList.contains('open');
+          if (open) {
+            content.classList.remove('open');
+            content.style.maxHeight = '0px';
+            content.setAttribute('aria-hidden','true');
+            btn.setAttribute('aria-expanded','false');
+            chev.classList.remove('open');
+          } else {
+            content.classList.add('open');
+            content.style.maxHeight = content.scrollHeight + 24 + 'px';
+            content.setAttribute('aria-hidden','false');
+            btn.setAttribute('aria-expanded','true');
+            chev.classList.add('open');
+          }
+        };
+
+        btn.addEventListener('click', toggle);
+        btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      });
+
+      // Open / Close all
+      document.getElementById('open-all').addEventListener('click', () => {
+        document.querySelectorAll('.route-content').forEach(c => {
+          if (!c.classList.contains('open')) {
+            c.classList.add('open');
+            c.style.maxHeight = c.scrollHeight + 24 + 'px';
+            c.setAttribute('aria-hidden','false');
+            const b = document.querySelector(`.chev-btn[data-target="\${c.id}"]`);
+            if (b) b.querySelector('.chev').classList.add('open');
+            if (b) b.setAttribute('aria-expanded','true');
+          }
+        });
+      });
+      document.getElementById('close-all').addEventListener('click', () => {
+        document.querySelectorAll('.route-content').forEach(c => {
+          c.classList.remove('open');
+          c.style.maxHeight = '0px';
+          c.setAttribute('aria-hidden','true');
+          const b = document.querySelector(`.chev-btn[data-target="\${c.id}"]`);
+          if (b) b.querySelector('.chev').classList.remove('open');
+          if (b) b.setAttribute('aria-expanded','false');
+        });
+      });
+
+      // Ensure all collapsed initially
+      document.querySelectorAll('.route-content').forEach(c => {
+        c.style.maxHeight = '0px';
+        c.classList.remove('open');
+        c.setAttribute('aria-hidden','true');
+      });
+
+      // Search filter (route name & stops)
+      const searchInput = document.getElementById('search');
+      searchInput.addEventListener('input', () => {
+        const q = searchInput.value.trim().toLowerCase();
+        document.querySelectorAll('#routesList article').forEach(card => {
+          const name = (card.dataset.name || '').toLowerCase();
+          const stops = card.dataset.stops || '';
+          if (!q) { card.style.display = ''; return; }
+          if (name.includes(q) || stops.toLowerCase().includes(q)) {
+            card.style.display = '';
+            const content = card.querySelector('.route-content');
+            const btn = card.querySelector('.chev-btn');
+            if (content && !content.classList.contains('open')) {
+              content.classList.add('open');
+              content.style.maxHeight = content.scrollHeight + 24 + 'px';
+              content.setAttribute('aria-hidden','false');
+              if (btn) btn.querySelector('.chev').classList.add('open');
+            }
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+
+      // Back to top button
+      const backTop = document.getElementById('backTop');
+      window.addEventListener('scroll', () => {
+        if (window.scrollY > 320) backTop.classList.remove('hidden');
+        else backTop.classList.add('hidden');
+      });
+      backTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+      // Bottom nav buttons
+      document.querySelectorAll('.nav-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+          btn.classList.add('active');
+          const view = btn.dataset.view;
+          if (view === 'routes') {
+            document.getElementById('search').focus();
+            document.getElementById('routesList').scrollIntoView({ behavior:'smooth' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        });
+      });
+
+    }); // DOMContentLoaded
+  </script>
+<!-- Small Next Button -->
+    <div class="mt-6 text-center">
+      <a href="map.html" class="px-4 py-2 text-sm rounded-full bg-blue-500 text-white shadow hover:bg-blue-600 transition">Next ➡</a>
+    </div>
+<!-- Small Back Button -->
+<div class="mt-6 text-center">
+  <a href="student.html" class="px-4 py-2 text-sm rounded-full bg-gray-500 text-white shadow hover:bg-gray-600 transition">⬅ Back</a>
+</div>
+
+</body>
+</html>
