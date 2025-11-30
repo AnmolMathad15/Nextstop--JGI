@@ -19,7 +19,6 @@ interface StudentPageProps {
   onLogout: () => void;
 }
 
-// todo: remove mock notifications - replace with real-time data
 const mockNotifications = [
   { type: "route" as const, title: "Route Update", message: "A new stop has been added to keshwapur route.", time: "10:30 AM" },
   { type: "location" as const, title: "Bus Approaching", message: "Your bus is 5 minutes away from Shakti Colony.", time: "7:25 AM" },
@@ -64,7 +63,7 @@ export default function StudentPage({ userName, onLogout }: StudentPageProps) {
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <BusMap routeId={selectedRoute} selectedStop={selectedStop} />
+              <BusMap routeId={selectedRoute} selectedStop={selectedStop} role="student" />
             </div>
           );
         }

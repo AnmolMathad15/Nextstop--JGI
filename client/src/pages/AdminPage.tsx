@@ -30,7 +30,7 @@ export default function AdminPage({ userName, onLogout }: AdminPageProps) {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <BusMap showAllBuses />
+          <BusMap showAllBuses role="admin" />
         </div>
       </div>
     );
@@ -53,7 +53,7 @@ export default function AdminPage({ userName, onLogout }: AdminPageProps) {
         <AppHeader userName={userName} userRole="admin" onLogout={onLogout} />
         
         <div className="flex-1 overflow-auto">
-          <AdminDashboard />
+          <AdminDashboard onViewLiveMap={() => setShowLiveMap(true)} />
         </div>
       </div>
     </div>

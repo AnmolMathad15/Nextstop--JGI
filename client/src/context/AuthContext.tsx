@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback } from "react";
+import { apiRequest } from "@/lib/queryClient";
 
 export type UserRole = "student" | "driver" | "admin";
 
@@ -9,8 +10,18 @@ export interface User {
   name?: string;
 }
 
+export interface AuthData {
+  user: User;
+  driverId?: string;
+  assignedBusId?: string;
+  studentId?: string;
+  preferredRouteId?: number;
+  preferredStop?: string;
+}
+
 interface AuthContextType {
   user: User | null;
+  authData: AuthData | null;
   isAuthenticated: boolean;
   login: (username: string, password: string, role: UserRole) => Promise<boolean>;
   logout: () => void;
@@ -19,27 +30,37 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [authData, setAuthData] = useState<AuthData | null>(null);
 
-  const login = useCallback(async (username: string, _password: string, role: UserRole): Promise<boolean> => {
-    // todo: remove mock functionality - replace with actual API call
-    const mockUsers: Record<UserRole, User> = {
-      student: { id: "STU001", username, role: "student", name: "Rahul Kumar" },
-      driver: { id: "DRV001", username, role: "driver", name: "Ravi Patil" },
-      admin: { id: "ADM001", username, role: "admin", name: "Admin User" },
-    };
+  const login = useCallback(async (username: string, password: string, role: UserRole): Promise<boolean> => {
+    try {
+      const response = await apiRequest("POST", "/api/auth/login", { username, password, role });
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setUser(mockUsers[role]);
-    return true;
+      setAuthData(data);
+      return true;
+    } catch (error) {
+      console.error("Login failed:", error);
+      return false;
+    }
   }, []);
 
   const logout = useCallback(() => {
-    setUser(null);
+    setAuthData(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout }}>
+    <AuthContext.Provider value={{ 
+      user: authData?.user || null, 
+      authData,
+      isAuthenticated: !!authData, 
+      login, 
+      logout 
+    }}>
       {children}
     </AuthContext.Provider>
   );

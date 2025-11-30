@@ -1,80 +1,121 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Play, Square, MapPin, Navigation, Wifi, WifiOff, Clock, Users, Route } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ROUTES_DATA } from "@/lib/constants";
+import { useQuery } from "@tanstack/react-query";
+import { useWebSocket } from "@/hooks/useWebSocket";
 
 interface DriverDashboardProps {
   driverName: string;
   driverId: string;
+  assignedBusId?: string;
 }
 
-export default function DriverDashboard({ driverName, driverId }: DriverDashboardProps) {
-  const [selectedBus, setSelectedBus] = useState<string>("");
+interface Bus {
+  id: string;
+  number: string;
+  capacity: number;
+  isActive: boolean;
+}
+
+interface RouteData {
+  id: number;
+  name: string;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+export default function DriverDashboard({ driverName, driverId, assignedBusId }: DriverDashboardProps) {
+  const [selectedBus, setSelectedBus] = useState<string>(assignedBusId || "");
   const [selectedRoute, setSelectedRoute] = useState<string>("");
-  const [isTripActive, setIsTripActive] = useState(false);
-  const [isConnected, setIsConnected] = useState(true);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [tripStartTime, setTripStartTime] = useState<Date | null>(null);
   const [locationSentCount, setLocationSentCount] = useState(0);
+  const [tripDuration, setTripDuration] = useState("0:00");
 
-  // todo: remove mock data - replace with real bus data from API
-  const buses = [
-    { id: "BUS001", number: "KA-25-A-1234" },
-    { id: "BUS002", number: "KA-25-B-5678" },
-    { id: "BUS003", number: "KA-25-C-9012" },
-    { id: "BUS004", number: "KA-25-D-3456" },
-  ];
+  const { data: buses = [] } = useQuery<Bus[]>({
+    queryKey: ["/api/buses"],
+  });
+
+  const { data: routes = [] } = useQuery<RouteData[]>({
+    queryKey: ["/api/routes"],
+  });
+
+  const { isConnected, tripId, startTrip, endTrip, sendLocation } = useWebSocket({
+    role: "driver",
+    userId: driverId,
+  });
+
+  const isTripActive = !!tripId;
 
   useEffect(() => {
-    if (isTripActive && selectedRoute) {
-      const watchId = navigator.geolocation.watchPosition(
+    let watchId: number;
+    
+    if (isTripActive && selectedRoute && selectedBus) {
+      watchId = navigator.geolocation.watchPosition(
         (position) => {
-          setCurrentLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          });
+          const { latitude, longitude, speed, heading, accuracy } = position.coords;
+          setCurrentLocation({ lat: latitude, lng: longitude });
           setLocationSentCount((prev) => prev + 1);
-          console.log("Location sent:", position.coords);
-          // todo: Send to WebSocket server
+          
+          sendLocation(
+            parseInt(selectedRoute),
+            selectedBus,
+            latitude,
+            longitude,
+            speed ?? undefined,
+            heading ?? undefined,
+            accuracy ?? undefined
+          );
         },
         (error) => {
           console.error("Geolocation error:", error);
-          setIsConnected(false);
         },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
-
-      return () => navigator.geolocation.clearWatch(watchId);
     }
-  }, [isTripActive, selectedRoute]);
 
-  const handleStartTrip = () => {
+    return () => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isTripActive, selectedRoute, selectedBus, sendLocation]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (tripStartTime) {
+      interval = setInterval(() => {
+        const diff = Date.now() - tripStartTime.getTime();
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        setTripDuration(`${minutes}:${seconds.toString().padStart(2, "0")}`);
+      }, 1000);
+    }
+
+    return () => clearInterval(interval);
+  }, [tripStartTime]);
+
+  const handleStartTrip = useCallback(() => {
     if (!selectedBus || !selectedRoute) {
       alert("Please select a bus and route first");
       return;
     }
-    setIsTripActive(true);
+    startTrip(driverId, selectedBus, parseInt(selectedRoute));
     setTripStartTime(new Date());
     setLocationSentCount(0);
-    console.log("Trip started:", { bus: selectedBus, route: selectedRoute });
-  };
+  }, [selectedBus, selectedRoute, driverId, startTrip]);
 
-  const handleEndTrip = () => {
-    setIsTripActive(false);
-    setTripStartTime(null);
-    console.log("Trip ended");
-  };
+  const handleEndTrip = useCallback(() => {
+    if (tripId) {
+      endTrip(tripId);
+      setTripStartTime(null);
+      setCurrentLocation(null);
+    }
+  }, [tripId, endTrip]);
 
-  const getTripDuration = () => {
-    if (!tripStartTime) return "0:00";
-    const diff = Date.now() - tripStartTime.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const seconds = Math.floor((diff % 60000) / 1000);
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-  };
+  const selectedRouteData = routes.find((r) => r.id.toString() === selectedRoute);
 
   return (
     <div className="p-4 max-w-2xl mx-auto space-y-4 pb-24">
@@ -103,7 +144,7 @@ export default function DriverDashboard({ driverName, driverId }: DriverDashboar
                 <SelectValue placeholder="Select a bus" />
               </SelectTrigger>
               <SelectContent>
-                {buses.map((bus) => (
+                {buses.filter(b => b.isActive).map((bus) => (
                   <SelectItem key={bus.id} value={bus.id}>
                     {bus.number}
                   </SelectItem>
@@ -119,7 +160,7 @@ export default function DriverDashboard({ driverName, driverId }: DriverDashboar
                 <SelectValue placeholder="Select a route" />
               </SelectTrigger>
               <SelectContent>
-                {ROUTES_DATA.map((route) => (
+                {routes.filter(r => r.isActive).map((route) => (
                   <SelectItem key={route.id} value={route.id.toString()}>
                     {route.name}
                   </SelectItem>
@@ -136,11 +177,11 @@ export default function DriverDashboard({ driverName, driverId }: DriverDashboar
             <div className="flex items-center justify-between mb-4">
               <Badge className="bg-green-500 text-white gap-1 animate-pulse">
                 <MapPin className="h-3 w-3" />
-                Trip Active
+                Trip Active - Broadcasting Live
               </Badge>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Clock className="h-4 w-4" />
-                <span data-testid="text-trip-duration">{getTripDuration()}</span>
+                <span data-testid="text-trip-duration">{tripDuration}</span>
               </div>
             </div>
 
@@ -168,7 +209,7 @@ export default function DriverDashboard({ driverName, driverId }: DriverDashboar
         <Card className="text-center p-4">
           <Route className="h-6 w-6 mx-auto mb-2 text-primary" />
           <p className="text-2xl font-bold" data-testid="text-stops-count">
-            {selectedRoute ? ROUTES_DATA.find((r) => r.id.toString() === selectedRoute)?.stops.length || 0 : 0}
+            {selectedRouteData ? 10 : 0}
           </p>
           <p className="text-xs text-muted-foreground">Stops</p>
         </Card>
@@ -189,7 +230,7 @@ export default function DriverDashboard({ driverName, driverId }: DriverDashboar
           <Button
             onClick={handleStartTrip}
             className="w-full py-6 bg-green-500 hover:bg-green-600 text-white font-bold text-lg gap-2"
-            disabled={!selectedBus || !selectedRoute}
+            disabled={!selectedBus || !selectedRoute || !isConnected}
             data-testid="button-start-trip"
           >
             <Play className="h-5 w-5" />

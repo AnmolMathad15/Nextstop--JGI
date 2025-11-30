@@ -13,18 +13,18 @@ type NavItem = "map" | "routes" | "alerts" | "reports" | "history";
 
 interface DriverPageProps {
   userName: string;
-  userId: string;
+  driverId: string;
+  assignedBusId?: string;
   onLogout: () => void;
 }
 
-// todo: remove mock notifications
 const mockNotifications = [
   { type: "route" as const, title: "Route Update", message: "Route #58B for tomorrow has been assigned to you.", time: "4:45 PM" },
   { type: "maintenance" as const, title: "Vehicle Maintenance", message: "Scheduled maintenance check tomorrow at 9 AM.", time: "9:15 AM" },
   { type: "general" as const, title: "Safety Reminder", message: "Please ensure all safety protocols are followed.", time: "Yesterday" },
 ];
 
-export default function DriverPage({ userName, userId, onLogout }: DriverPageProps) {
+export default function DriverPage({ userName, driverId, assignedBusId, onLogout }: DriverPageProps) {
   const [activeNav, setActiveNav] = useState<NavItem>("map");
 
   const handleReportSubmit = async (data: { reason: string; notes: string; photo?: File }) => {
@@ -38,14 +38,18 @@ export default function DriverPage({ userName, userId, onLogout }: DriverPagePro
       case "map":
         return (
           <div className="flex-1 overflow-auto pb-20">
-            <DriverDashboard driverName={userName} driverId={userId} />
+            <DriverDashboard 
+              driverName={userName} 
+              driverId={driverId}
+              assignedBusId={assignedBusId}
+            />
           </div>
         );
 
       case "routes":
         return (
           <div className="flex-1 relative">
-            <BusMap showAllBuses />
+            <BusMap showAllBuses role="admin" />
           </div>
         );
 

@@ -1,10 +1,12 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import { Search, Plus, Minus, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { HUBLI_CENTER, ROUTES_DATA, JCET_COLLEGE_COORDS } from "@/lib/constants";
+import { useQuery } from "@tanstack/react-query";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
 import MissedBusAlert from "./MissedBusAlert";
 
 const busIcon = new L.DivIcon({
@@ -35,10 +37,40 @@ const collegeIcon = new L.DivIcon({
   iconAnchor: [18, 18],
 });
 
+interface RouteStop {
+  id: number;
+  routeId: number;
+  name: string;
+  lat: number;
+  lng: number;
+  scheduledTime: string;
+  sequence: number;
+}
+
+interface RouteWithStops {
+  id: number;
+  name: string;
+  displayOrder: number;
+  isActive: boolean;
+  stops: RouteStop[];
+}
+
+interface LocationUpdate {
+  tripId: string;
+  routeId: number;
+  busId: string;
+  lat: number;
+  lng: number;
+  speed?: number;
+  heading?: number;
+  accuracy?: number;
+}
+
 interface BusMapProps {
   routeId?: number;
   selectedStop?: string;
   showAllBuses?: boolean;
+  role?: "student" | "admin";
 }
 
 function MapControls() {
@@ -79,84 +111,82 @@ function MapControls() {
   );
 }
 
-export default function BusMap({ routeId, selectedStop, showAllBuses = false }: BusMapProps) {
+export default function BusMap({ routeId, selectedStop, showAllBuses = false, role = "student" }: BusMapProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [busPosition, setBusPosition] = useState<{ lat: number; lng: number } | null>(null);
-  const [eta, setEta] = useState<number | null>(null);
+  const [busLocations, setBusLocations] = useState<Map<string, LocationUpdate>>(new Map());
   const [isMissed, setIsMissed] = useState(false);
-  const animationRef = useRef<number>();
 
-  const selectedRouteData = routeId ? ROUTES_DATA.find((r) => r.id === routeId) : null;
-  const selectedStopData = selectedRouteData?.stops.find((s) => s.name === selectedStop);
+  const { data: routeData } = useQuery<RouteWithStops>({
+    queryKey: ["/api/routes", routeId],
+    enabled: !!routeId,
+  });
 
-  useEffect(() => {
-    if (!selectedRouteData) return;
+  const handleLocationUpdate = useCallback((location: LocationUpdate) => {
+    setBusLocations(prev => {
+      const updated = new Map(prev);
+      updated.set(location.tripId, location);
+      return updated;
+    });
+  }, []);
 
-    const stops = selectedRouteData.stops;
-    let currentIndex = 0;
-    let progress = 0;
+  const handleBusOffline = useCallback((tripId: string) => {
+    setBusLocations(prev => {
+      const updated = new Map(prev);
+      updated.delete(tripId);
+      return updated;
+    });
+  }, []);
 
-    // todo: remove mock functionality - replace with real-time WebSocket data
-    const animate = () => {
-      if (currentIndex >= stops.length - 1) {
-        currentIndex = 0;
-        progress = 0;
-      }
-
-      const start = stops[currentIndex];
-      const end = stops[currentIndex + 1];
-
-      const lat = start.lat + (end.lat - start.lat) * progress;
-      const lng = start.lng + (end.lng - start.lng) * progress;
-
-      setBusPosition({ lat, lng });
-
-      progress += 0.02;
-      if (progress >= 1) {
-        progress = 0;
-        currentIndex++;
-      }
-
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animate();
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [selectedRouteData]);
+  const { isConnected, locations: wsLocations } = useWebSocket({
+    role: role === "admin" ? "admin" : "student",
+    routeId: showAllBuses ? undefined : routeId,
+    onLocationUpdate: handleLocationUpdate,
+    onBusOffline: handleBusOffline,
+  });
 
   useEffect(() => {
-    if (busPosition && selectedStopData) {
-      const distance = Math.sqrt(
-        Math.pow(busPosition.lat - selectedStopData.lat, 2) +
-        Math.pow(busPosition.lng - selectedStopData.lng, 2)
-      );
-      const estimatedMinutes = Math.round(distance * 500);
-      setEta(estimatedMinutes);
+    const initialLocations = new Map<string, LocationUpdate>();
+    wsLocations.forEach(loc => {
+      initialLocations.set(loc.tripId, loc);
+    });
+    setBusLocations(initialLocations);
+  }, [wsLocations]);
 
-      // todo: remove mock functionality - Check if bus has passed the stop
+  const selectedStopData = routeData?.stops.find((s) => s.name === selectedStop);
+
+  useEffect(() => {
+    if (selectedStopData) {
       const now = new Date();
       const [hours, minutes] = selectedStopData.scheduledTime.split(":").map(Number);
       const scheduledDate = new Date();
       scheduledDate.setHours(hours, minutes, 0, 0);
-
-      // For demo, show missed alert if current time is past 8 AM
-      setIsMissed(now.getHours() >= 20);
+      setIsMissed(now > scheduledDate && now.getHours() < 12);
     }
-  }, [busPosition, selectedStopData]);
+  }, [selectedStopData]);
 
-  const routeCoordinates = selectedRouteData?.stops.map((s) => [s.lat, s.lng] as [number, number]) || [];
+  const routeCoordinates = routeData?.stops.map((s) => [s.lat, s.lng] as [number, number]) || [];
+
+  const calculateETA = () => {
+    if (!selectedStopData || busLocations.size === 0) return null;
+    
+    const busLocation = Array.from(busLocations.values())[0];
+    if (!busLocation) return null;
+
+    const distance = Math.sqrt(
+      Math.pow(busLocation.lat - selectedStopData.lat, 2) +
+      Math.pow(busLocation.lng - selectedStopData.lng, 2)
+    );
+    return Math.max(1, Math.round(distance * 500));
+  };
+
+  const eta = calculateETA();
 
   return (
     <div className="relative h-full w-full" data-testid="bus-map">
-      {isMissed && selectedRouteData && selectedStopData && (
+      {isMissed && routeData && selectedStopData && (
         <div className="absolute top-4 left-4 right-4 z-[1000]">
           <MissedBusAlert
-            routeName={selectedRouteData.name}
+            routeName={routeData.name}
             stopName={selectedStopData.name}
             departureTime={selectedStopData.scheduledTime}
           />
@@ -189,12 +219,15 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false }: 
               <p className="text-2xl font-bold text-primary" data-testid="text-eta">{eta} min</p>
             </div>
           </div>
-          <div className="mt-2 pt-2 border-t border-gray-200">
+          <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
               Expected arrival: <span className="font-medium" data-testid="text-arrival-time">
                 {new Date(Date.now() + eta * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             </p>
+            <span className={`text-xs px-2 py-1 rounded-full ${isConnected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+              {isConnected ? "Live" : "Offline"}
+            </span>
           </div>
         </div>
       )}
@@ -214,16 +247,16 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false }: 
           <Popup>JCET College - Destination</Popup>
         </Marker>
 
-        {selectedRouteData && (
+        {routeData && (
           <>
             <Polyline
               positions={routeCoordinates}
               pathOptions={{ color: "#0f766e", weight: 5, opacity: 0.8 }}
             />
 
-            {selectedRouteData.stops.map((stop) => (
+            {routeData.stops.map((stop) => (
               <Marker
-                key={stop.name}
+                key={stop.id}
                 position={[stop.lat, stop.lng]}
                 icon={stop.name === selectedStop ? selectedStopIcon : stopIcon}
               >
@@ -237,26 +270,18 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false }: 
           </>
         )}
 
-        {busPosition && (
-          <Marker position={[busPosition.lat, busPosition.lng]} icon={busIcon}>
-            <Popup>
-              <strong>Bus Location</strong>
-              <br />
-              {selectedRouteData?.name}
-            </Popup>
-          </Marker>
-        )}
-
-        {showAllBuses && ROUTES_DATA.map((route) => (
+        {Array.from(busLocations.values()).map((location) => (
           <Marker
-            key={route.id}
-            position={[route.stops[Math.floor(route.stops.length / 2)].lat, route.stops[Math.floor(route.stops.length / 2)].lng]}
+            key={location.tripId}
+            position={[location.lat, location.lng]}
             icon={busIcon}
           >
             <Popup>
-              <strong>{route.name}</strong>
+              <strong>Live Bus Location</strong>
               <br />
-              Bus in transit
+              Route ID: {location.routeId}
+              <br />
+              <span className="text-green-600">Tracking live</span>
             </Popup>
           </Marker>
         ))}
