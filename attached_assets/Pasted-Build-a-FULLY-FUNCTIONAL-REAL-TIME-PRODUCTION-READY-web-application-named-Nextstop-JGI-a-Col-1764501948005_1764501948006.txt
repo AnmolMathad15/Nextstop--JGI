@@ -1,0 +1,297 @@
+Build a FULLY FUNCTIONAL, REAL-TIME, PRODUCTION-READY web application named:
+
+“Nextstop JGI” — a College Bus Tracking System
+
+This is a FINAL YEAR ENGINEERING PROJECT. 
+DO NOT generate just UI. Generate FRONTEND + BACKEND + REAL-TIME LOGIC + DATABASE MODELS.
+Use clean folder structure and runnable code.
+
+==============================
+1. USERS & ROLES
+==============================
+There are THREE roles with SEPARATE AUTHENTICATION:
+
+1) STUDENT
+   - Login using USN
+   - Can ONLY view data (read-only)
+2) DRIVER
+   - Login using driver ID
+   - Can update live GPS location of assigned bus
+3) ADMIN
+   - Login using admin ID
+   - Full control (CRUD for buses, routes, drivers, students)
+
+Use JWT-based authentication with role-based access control.
+
+==============================
+2. CORE FEATURES (MANDATORY)
+==============================
+STUDENT MODULE – ROUTE & STOP SELECTION (MANDATORY)
+==============================
+In the STUDENT module, follow this EXACT flow:
+
+1) After student login (via USN), DO NOT go directly to a map.
+   First show a page listing ALL available routes.
+
+2) Display these EXACT 6 routes by name (DO NOT rename or modify):
+
+   1. keshwapur route
+   2. Pg route
+   3. siddaroodh math route
+   4. Gadag route(BVB route)
+   5. Dharwad route
+   6. Navangar route
+
+3) When the student selects a route, show a SECOND dropdown or list
+   of bus stops (sub-stops) only from that route.
+
+4) The stops under EACH route are EXACTLY as follows.
+   Use these as seed data in the database (routes + stops).
+   DO NOT change names, spacing, or order.
+
+   Route 1: keshwapur route
+   Bus stops under this route:
+     - Shakti Colony
+     - Sub jail
+     - lions School.
+     - Venkatesh Colony
+     - Madhura Colony
+     - keshwapur circle
+     - GopanKoppa
+     - JK School
+     - Sainagar last stop
+     - jcet college
+
+   Route 2: Pg route
+   Bus stops under this route:
+     - tolankeri
+     - akshay colony petrol pump
+     - pg (focusmart )
+     - siddeshwar park
+     - lingaraj nagar
+     - adarsh college
+     - unkal lake
+     - president hotel
+     - sainagar last stop
+     - Jcet college
+
+   Route 3: siddaroodh math route
+   Bus stops under this route:
+     - nehru nagar tank
+     - manjunath nagar cross
+     - anand nagar
+     - siddaroodh math
+     - murdeshwar ceramics
+     - akshay park petrol bunk
+     - ravi nagar
+     - siddeshwar park
+     - lingaraj nagar
+     - adrash college
+     - unkal lake
+     - president hotel
+     - sai nagar last stop
+     - jcet college
+
+   Route 4: Gadag route(BVB route)
+   Bus stops under this route:
+     - head post office
+     - corporation
+     - old busstand
+     - canara hotel hosur circle
+     - KMC stop
+     - Gurudatta Bhavan
+     - Arts College
+     - BVB college
+     - unkal cross
+     - siddappa ajja temple old
+     - president hotel
+     - sai nagar last stop
+     - JCET college
+
+   Route 5: Dharwad route
+   Bus stops under this route:
+     - Srinagar Dharwad
+     - saptapur well
+     - Dasanakoppa circle
+     - Jubilee circle
+     - NTTF
+     - Toll Naka
+     - JSS College
+     - Gandhinagar
+     - SDM Dental College
+     - Rayapur RTO
+     - navnagar
+     - APMC
+     - Bairidevarakoppa
+     - President Hotel
+     - Sai Nagar bus stop
+     - JCET college
+
+   Route 6: Navangar route
+   Bus stops under this route:
+     - navnagar
+     - APMC
+     - Bairi devarakappa
+     - President Hotel
+     - Sai Nagar last stop
+     - JCET college
+
+5) Once the student selects BOTH:
+   - route
+   - and their specific sub-stop
+
+   THEN:
+   - Load the MAP view.
+   - Show ONLY the selected route path with a polyline.
+   - Highlight the selected sub-stop on the map.
+   - Show the LIVE BUS LOCATION for that route.
+   - Display:
+       - ETA to the selected sub-stop
+       - Expected arrival time (current time + ETA)
+
+6) MISSED BUS LOGIC (MANDATORY):
+   - For each sub-stop, store a scheduled departure time.
+   - Compare the current time with the departure time for that sub-stop.
+   - If current time > scheduled departure time:
+       - Do NOT show misleading ETA.
+       - Instead show a clear notification on screen, such as:
+
+         "The bus on [ROUTE NAME] has already departed from [SUBSTOP]."
+
+       - Show this as a red/yellow alert box in the UI.
+
+7) IMPORTANT:
+   - Route names and stop names MUST be used exactly as written above.
+   - Do NOT auto-correct spellings.
+
+DRIVER DASHBOARD:
+- Login
+- Assign/select bus
+- Start trip / End trip
+- Capture live GPS (browser Geo API or simulated movement)
+- Send updated latitude & longitude to backend every few seconds
+- Show “location sent successfully” status
+
+ADMIN DASHBOARD:
+- Login
+- Add / edit / delete:
+  - Buses (bus number, route, driver)
+  - Routes (route name, stops)
+  - Drivers (ID, name, phone)
+  - Students (USN, name)
+- View all buses live on one map
+
+==============================
+3. REAL-TIME REQUIREMENTS
+==============================
+- Use WebSockets (Socket.IO or native WebSocket)
+- Driver → Backend: send live location
+- Backend → Students/Admin: broadcast location instantly
+- No polling allowed (true real-time only)
+
+==============================
+4. TECH STACK (MUST FOLLOW)
+==============================
+FRONTEND:
+- React.js with Vite
+- Modern component-based structure
+- Responsive design
+
+BACKEND:
+- Node.js + Express.js
+- Socket.IO for real-time communication
+- REST APIs for auth and data management
+
+DATABASE:
+- MongoDB
+- Collections:
+  - users (role: student / driver / admin)
+  - buses
+  - routes
+  - liveLocations
+
+MAP:
+- Google Maps API OR Leaflet + OpenStreetMap
+- Show moving markers smoothly
+
+==============================
+5. BRANDING & UI REQUIREMENTS
+==============================
+SITE NAME (exact): Nextstop JGI
+
+GLOBAL BACKGROUND:
+- Image: "jcet logo pic.jpg"
+- Full-screen, cover
+- Soft white overlay for readability
+
+TOP RIBBON (ALL PAGES):
+- Sticky at top
+- Gradient: teal (#0f766e) → blue (#2563eb)
+- Text color: white
+- Include:
+  - College logo: "jgilogo.jpg"
+  - Scrolling marquee text:
+    "JAIN COLLEGE OF ENGINEERING AND TECHNOLOGY" (ALL CAPS)
+- Font: Stanley (fallback: bold condensed Google font)
+
+HEADER:
+- Left side brand:
+  - Logo: "logo.jpg"
+  - Text: Nextstop JGI
+
+COLOR PALETTE:
+- Primary: teal (#0f766e)
+- Secondary: blue (#2563eb)
+- Accent: yellow for highlights
+
+==============================
+6. PROJECT STRUCTURE
+==============================
+Generate a clear, runnable structure:
+
+/nextstop-jgi
+  /backend
+    server.js
+    config/
+    models/
+    routes/
+    sockets/
+  /frontend
+    /src
+    main.jsx
+    App.jsx
+    pages/
+    components/
+  README.md
+
+==============================
+7. SEED & DEMO DATA
+==============================
+- Seed database with:
+  - 1 admin
+  - 2 drivers
+  - 10 buses
+  - Sample student USNs
+- Include demo route data
+- App must work immediately after setup
+
+==============================
+8. RUNNABLE OUTPUT REQUIRED
+==============================
+- Provide complete source code (no pseudocode)
+- Include README with:
+  - Installation commands
+  - Environment variables
+  - How to run frontend & backend
+- App must run locally on localhost without extra configuration
+
+==============================
+IMPORTANT RULES
+==============================
+- No placeholder text like “TODO”
+- No skipped files
+- No mock-only UI
+- Assume this will be evaluated by examiners
+- Code must be clean, readable, and structured
+
+Deliver a REAL, WORKING system

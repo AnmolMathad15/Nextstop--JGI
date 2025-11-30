@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NextStop JGI - Notifications</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+  <style>
+    :root {
+      --nextstop-teal: #0f766e;
+      --nextstop-blue: #2563eb;
+      --nextstop-green: #059669;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: url('jcet logo pic.jpg') no-repeat center center fixed;
+      background-size: cover; /* full screen background */
+      min-height: 100vh;
+      color: white;
+    }
+
+    /* Ribbon bar */
+    .ribbon {
+      background: linear-gradient(90deg, var(--nextstop-teal), var(--nextstop-blue), var(--nextstop-green));
+      padding: 8px 0;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font-weight: bold;
+    }
+    .ribbon img {
+      height: 40px;
+      width: 40px;
+      border-radius: 60%;
+      background: white;
+      padding: 2px;
+    }
+
+    /* App title */
+    .app-header {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .app-title {
+      font-size: 1.8rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, var(--nextstop-teal), var(--nextstop-green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* Notification cards */
+    .notification-card {
+      display: flex;
+      gap: 1rem;
+      padding: 14px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      background: rgba(0,0,0,0.5); /* transparent black */
+      backdrop-filter: blur(6px);
+      color: white;
+    }
+    .notification-card .icon-wrap {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: var(--nextstop-teal);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .notification-card .title {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .notification-card .time {
+      font-size: 0.8rem;
+      color: #ddd;
+      margin-top: 4px;
+    }
+
+    /* Floating buttons */
+    .floating-btn {
+      position: fixed;
+      bottom: 80px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 22px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+    }
+    .floating-left { left: 16px; background: var(--nextstop-teal); }
+    .floating-right { right: 16px; background: var(--nextstop-green); }
+
+    /* Bottom nav */
+    footer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(6px);
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0;
+    }
+    footer a {
+      text-decoration: none;
+      color: white;
+      font-size: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    footer a.active {
+      color: var(--nextstop-green);
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+   <!-- Ribbon Bar -->
+<div class="w-full bg-gradient-to-r from-teal-600 to-blue-700 text-white py-4 overflow-hidden">
+  <div class="ribbon-text flex items-center gap-6">
+    <img src="jgilogo.jpg" alt="JGI Logo" class="h-12 w-12 rounded-full"/>
+    <span class="font-bold tracking-wide text-2xl">JAIN COLLEGE OF ENGINEERING AND TECHNOLOGY,HUBBALLI</span>
+  </div>
+</div>
+
+
+
+  <!-- Header -->
+  <div class="app-header">
+    <img src="logo.jpg" alt="App Logo" class="h-10 w-10 rounded-full shadow-lg"/>
+    <h1 class="app-title">NEXTSTOP JGI</h1>
+  </div>
+
+  <!-- Notifications -->
+  <main style="max-width: 800px; margin: auto; padding: 1rem;">
+    <h2 style="margin-bottom: 10px;">Today</h2>
+
+    <div class="notification-card">
+      <div class="icon-wrap"><span class="material-symbols-outlined">route</span></div>
+      <div>
+        <p class="title">Route Update</p>
+        <p>A new stop has been added to your route.</p>
+        <p class="time">10:30 AM</p>
+      </div>
+    </div>
+
+    <div class="notification-card">
+      <div class="icon-wrap"><span class="material-symbols-outlined">local_shipping</span></div>
+      <div>
+        <p class="title">Vehicle Maintenance</p>
+        <p>Scheduled maintenance check tomorrow.</p>
+        <p class="time">9:15 AM</p>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 20px; margin-bottom: 10px;">Yesterday</h2>
+
+    <div class="notification-card">
+      <div class="icon-wrap"><span class="material-symbols-outlined">route</span></div>
+      <div>
+        <p class="title">New Route Assigned</p>
+        <p>Route #58B for tomorrow has been assigned to you.</p>
+        <p class="time">4:45 PM</p>
+      </div>
+    </div>
+
+    <div class="notification-card">
+      <div class="icon-wrap"><span class="material-symbols-outlined">edit_location_alt</span></div>
+      <div>
+        <p class="title">Route Change Request</p>
+        <p>Your request to change route #58A has been approved.</p>
+        <p class="time">11:00 AM</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Floating Buttons -->
+  <a href="livetracking.html" class="floating-btn floating-left"><span class="material-symbols-outlined">arrow_back</span></a>
+  <a href="report.html" class="floating-btn floating-right"><span class="material-symbols-outlined">arrow_forward</span></a>
+
+  <!-- Bottom Nav -->
+  <footer>
+    <a href="#"><span class="material-symbols-outlined">dashboard</span>Dashboard</a>
+    <a href="#"><span class="material-symbols-outlined">podcasts</span>Live</a>
+    <a href="#" class="active"><span class="material-symbols-outlined">notifications</span>Notifications</a>
+    <a href="#"><span class="material-symbols-outlined">analytics</span>Reports</a>
+    <a href="#"><span class="material-symbols-outlined">history</span>History</a>
+  </footer>
+
+</body>
+</html>
