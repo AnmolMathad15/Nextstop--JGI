@@ -17,7 +17,7 @@ export default function AdminPage({ userName, onLogout }: AdminPageProps) {
 
   if (showLiveMap) {
     return (
-      <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen flex flex-col">
         <RibbonBar />
         <AppHeader userName={userName} userRole="admin" onLogout={onLogout} />
         <div className="flex-1 relative">
@@ -37,7 +37,7 @@ export default function AdminPage({ userName, onLogout }: AdminPageProps) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen flex flex-col">
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         <AppHeader userName={userName} userRole="admin" onLogout={onLogout} />

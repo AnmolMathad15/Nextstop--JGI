@@ -16,15 +16,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   };
 
   return (
-    <div 
-      className="min-h-screen flex flex-col"
-      style={{
-        backgroundImage: `url(${backgroundImage})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundAttachment: "fixed",
-      }}
-    >
+    <div className="min-h-screen flex flex-col">
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         

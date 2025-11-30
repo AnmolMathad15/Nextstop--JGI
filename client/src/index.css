@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Global background and glass morphism */
+html, body {
+  background: url('@assets/jcet logo pic_1764501988672.jpg') no-repeat center center fixed;
+  background-size: cover;
+  background-attachment: fixed;
+  color: white;
+}
+
+.glass-morphism {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.glass-container {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 /* LIGHT MODE */
 :root {
   --button-outline: rgba(0,0,0, .10);

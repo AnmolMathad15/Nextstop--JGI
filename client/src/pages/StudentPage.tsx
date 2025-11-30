@@ -179,7 +179,7 @@ export default function StudentPage({ userName, onLogout }: StudentPageProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen flex flex-col">
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         <AppHeader 
