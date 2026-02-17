@@ -1,11 +1,13 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql as drizzleSql } from "drizzle-orm";
 import { db } from "./db";
 import {
   users, routes, routeStops, buses, drivers, students, trips, liveLocations,
+  geoEvents, driverStats,
   type User, type InsertUser, type Route, type InsertRoute,
   type RouteStop, type InsertRouteStop, type Bus, type InsertBus,
   type Driver, type InsertDriver, type Student, type InsertStudent,
   type Trip, type InsertTrip, type LiveLocation, type InsertLiveLocation,
+  type GeoEvent, type InsertGeoEvent, type DriverStats, type InsertDriverStats,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -44,9 +46,54 @@ export interface IStorage {
   appendLiveLocation(location: InsertLiveLocation): Promise<LiveLocation>;
   getLatestLocationForTrip(tripId: string): Promise<LiveLocation | undefined>;
   getLatestLocationsForRoute(routeId: number): Promise<LiveLocation[]>;
+
+  // Analytics
+  logGeoEvent(event: InsertGeoEvent): Promise<GeoEvent>;
+  getLatestGeoEvent(tripId: string, stopId: number): Promise<GeoEvent | undefined>;
+  updateDriverStats(driverId: string, stats: Partial<InsertDriverStats>): Promise<DriverStats>;
+  getDriverStats(driverId: string): Promise<DriverStats | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
+  // ... existing methods (keeping for context)
+
+  async logGeoEvent(event: InsertGeoEvent): Promise<GeoEvent> {
+    const [created] = await db.insert(geoEvents).values(event).returning();
+    return created;
+  }
+
+  async getLatestGeoEvent(tripId: string, stopId: number): Promise<GeoEvent | undefined> {
+    const [event] = await db.select().from(geoEvents)
+      .where(and(eq(geoEvents.tripId, tripId), eq(geoEvents.stopId, stopId)))
+      .orderBy(desc(geoEvents.timestamp))
+      .limit(1);
+    return event;
+  }
+
+  async updateDriverStats(driverId: string, stats: Partial<InsertDriverStats>): Promise<DriverStats> {
+    const [existing] = await db.select().from(driverStats).where(eq(driverStats.driverId, driverId));
+    if (existing) {
+      const [updated] = await db.update(driverStats)
+        .set({ ...stats, lastUpdate: new Date() })
+        .where(eq(driverStats.driverId, driverId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(driverStats).values({ 
+        driverId, 
+        totalDistance: stats.totalDistance || 0,
+        avgSpeed: stats.avgSpeed || 0,
+        overspeedCount: stats.overspeedCount || 0,
+        performanceScore: stats.performanceScore || 100,
+      }).returning();
+      return created;
+    }
+  }
+
+  async getDriverStats(driverId: string): Promise<DriverStats | undefined> {
+    const [stats] = await db.select().from(driverStats).where(eq(driverStats.driverId, driverId));
+    return stats;
+  }
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;

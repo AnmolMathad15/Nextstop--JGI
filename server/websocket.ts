@@ -2,6 +2,18 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { storage } from "./storage";
 
+// Utility for speed and distance
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 interface LocationUpdate {
   tripId: string;
   routeId: number;
@@ -11,19 +23,24 @@ interface LocationUpdate {
   speed?: number;
   heading?: number;
   accuracy?: number;
+  timestamp?: number;
 }
 
 interface ClientInfo {
   role: "driver" | "student" | "admin";
   userId?: string;
+  driverId?: string;
   tripId?: string;
   routeId?: number;
 }
 
 const clients = new Map<WebSocket, ClientInfo>();
 const latestLocations = new Map<string, LocationUpdate>();
+const OVERSPEED_THRESHOLD = 60; // km/h
+const GEOFENCE_RADIUS = 0.2; // 200 meters in km
 
 export function setupWebSocket(server: Server) {
+  // ... existing setup ...
   const wss = new WebSocketServer({ server, path: "/ws" });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -74,10 +91,11 @@ export function setupWebSocket(server: Server) {
   return wss;
 }
 
-function handleAuth(ws: WebSocket, message: { role: string; userId?: string }) {
+function handleAuth(ws: WebSocket, message: { role: string; userId?: string; driverId?: string }) {
   const clientInfo: ClientInfo = {
     role: message.role as "driver" | "student" | "admin",
     userId: message.userId,
+    driverId: message.driverId,
   };
   clients.set(ws, clientInfo);
   ws.send(JSON.stringify({ type: "auth:success", role: clientInfo.role }));
@@ -106,25 +124,42 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
     return;
   }
 
+  const prevLocation = latestLocations.get(clientInfo.tripId);
+  const now = Date.now();
+  let calculatedSpeed = message.speed || 0;
+
+  // Calculate speed if not provided and we have a previous location
+  if (prevLocation && !message.speed) {
+    const distance = calculateDistance(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
+    const timeDiff = (now - (prevLocation.timestamp || now)) / 1000 / 3600; // hours
+    if (timeDiff > 0) {
+      calculatedSpeed = distance / timeDiff;
+    }
+  }
+
   const locationData: LocationUpdate = {
     tripId: clientInfo.tripId,
     routeId: message.routeId,
     busId: message.busId,
     lat: message.lat,
     lng: message.lng,
-    speed: message.speed,
+    speed: calculatedSpeed,
     heading: message.heading,
     accuracy: message.accuracy,
+    timestamp: now,
   };
 
   latestLocations.set(clientInfo.tripId, locationData);
+
+  // Background analytics processing
+  processAnalytics(clientInfo, locationData, prevLocation).catch(console.error);
 
   try {
     await storage.appendLiveLocation({
       tripId: clientInfo.tripId,
       lat: message.lat,
       lng: message.lng,
-      speed: message.speed,
+      speed: calculatedSpeed,
       heading: message.heading,
       accuracy: message.accuracy,
     });
@@ -142,6 +177,59 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
   });
 
   ws.send(JSON.stringify({ type: "location:ack" }));
+}
+
+async function processAnalytics(clientInfo: ClientInfo, current: LocationUpdate, prev?: LocationUpdate) {
+  if (!clientInfo.driverId) return;
+
+  const driverId = clientInfo.driverId;
+  const stats = await storage.getDriverStats(driverId) || {
+    driverId,
+    totalDistance: 0,
+    avgSpeed: 0,
+    overspeedCount: 0,
+    performanceScore: 100,
+  };
+
+  // 1. Distance update
+  if (prev) {
+    const dist = calculateDistance(prev.lat, prev.lng, current.lat, current.lng);
+    stats.totalDistance = (stats.totalDistance || 0) + dist;
+  }
+
+  // 2. Overspeed detection
+  let overspeedDetected = false;
+  if (current.speed && current.speed > OVERSPEED_THRESHOLD) {
+    stats.overspeedCount = (stats.overspeedCount || 0) + 1;
+    overspeedDetected = true;
+  }
+
+  // 3. Performance Score
+  stats.performanceScore = Math.max(0, 100 - (stats.overspeedCount || 0) * 5);
+  
+  // Throttle DB updates: only update if overspeed or distance changed significantly (e.g., > 100m)
+  if (overspeedDetected || (stats.totalDistance || 0) % 0.1 < 0.01) {
+    await storage.updateDriverStats(driverId, stats);
+  }
+
+  // 4. Geo-fencing
+  const stops = await storage.getRouteStops(current.routeId);
+  for (const stop of stops) {
+    const distToStop = calculateDistance(current.lat, current.lng, stop.lat, stop.lng);
+    const lastEvent = await storage.getLatestGeoEvent(current.tripId, stop.id);
+
+    if (distToStop <= GEOFENCE_RADIUS) {
+      // ENTER
+      if (!lastEvent || lastEvent.type === "EXIT") {
+        await storage.logGeoEvent({ tripId: current.tripId, stopId: stop.id, type: "ENTER" });
+      }
+    } else {
+      // EXIT
+      if (lastEvent && lastEvent.type === "ENTER") {
+        await storage.logGeoEvent({ tripId: current.tripId, stopId: stop.id, type: "EXIT" });
+      }
+    }
+  }
 }
 
 async function handleTripStart(ws: WebSocket, message: { driverId: string; busId: string; routeId: number }) {

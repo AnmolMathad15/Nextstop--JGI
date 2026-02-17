@@ -75,6 +75,43 @@ export const liveLocations = pgTable("live_locations", {
   recordedAt: timestamp("recorded_at").defaultNow(),
 });
 
+export const geoEvents = pgTable("geo_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tripId: varchar("trip_id").notNull().references(() => trips.id),
+  stopId: integer("stop_id").notNull().references(() => routeStops.id),
+  type: text("type").notNull(), // ENTER, EXIT
+  timestamp: timestamp("timestamp").defaultNow(),
+});
+
+export const driverStats = pgTable("driver_stats", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  driverId: varchar("driver_id").notNull().references(() => drivers.id).unique(),
+  totalDistance: real("total_distance").default(0),
+  avgSpeed: real("avg_speed").default(0),
+  overspeedCount: integer("overspeed_count").default(0),
+  performanceScore: integer("performance_score").default(100),
+  lastUpdate: timestamp("last_update").defaultNow(),
+});
+
+export const insertGeoEventSchema = createInsertSchema(geoEvents).pick({
+  tripId: true,
+  stopId: true,
+  type: true,
+});
+
+export const insertDriverStatsSchema = createInsertSchema(driverStats).pick({
+  driverId: true,
+  totalDistance: true,
+  avgSpeed: true,
+  overspeedCount: true,
+  performanceScore: true,
+});
+
+export type GeoEvent = typeof geoEvents.$inferSelect;
+export type DriverStats = typeof driverStats.$inferSelect;
+export type InsertGeoEvent = z.infer<typeof insertGeoEventSchema>;
+export type InsertDriverStats = z.infer<typeof insertDriverStatsSchema>;
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
