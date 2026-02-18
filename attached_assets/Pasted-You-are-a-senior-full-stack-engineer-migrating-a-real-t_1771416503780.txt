@@ -1,0 +1,85 @@
+You are a senior full-stack engineer migrating a real-time fleet tracking system from Leaflet to MapLibre GL JS.
+
+STRICT RULES:
+- Do NOT change UI layout.
+- Preserve search bar and overlays.
+- Only replace map engine.
+- Keep WebSocket logic intact.
+- Do NOT regenerate entire project.
+
+OBJECTIVE:
+Implement production-grade real-time tracking using MapLibre GL + OSRM (free stack).
+
+========================
+PART 1 — MAP INITIALIZATION
+========================
+
+1. Use maplibre-gl.
+2. Initialize map using useRef.
+3. Load style from:
+   https://demotiles.maplibre.org/style.json
+4. Center on Hubli coordinates.
+5. Add navigation control.
+6. Disable unnecessary re-renders.
+
+========================
+PART 2 — BUS MARKER
+========================
+
+1. Create custom HTML marker.
+2. Store marker in useRef.
+3. Update position using setLngLat().
+4. Rotate marker using heading.
+5. Do NOT recreate marker on update.
+
+========================
+PART 3 — SMOOTH ANIMATION
+========================
+
+1. Interpolate movement over 3000ms.
+2. Use requestAnimationFrame.
+3. Prevent overlapping animations.
+4. Sync with 3-second WebSocket updates.
+
+========================
+PART 4 — ROAD SNAPPING (OSRM)
+========================
+
+1. Backend: Integrate OSRM map matching:
+   https://router.project-osrm.org/match/v1/driving/
+
+2. Send previous + current coordinates.
+3. Receive snapped geometry.
+4. Emit snapped coordinates via WebSocket.
+5. Throttle OSRM calls to once every 3 seconds.
+6. Fallback to raw GPS if OSRM fails.
+
+========================
+PART 5 — GPS FILTERING
+========================
+
+1. Reject coordinates outside valid range.
+2. Ignore jumps > 300 meters.
+3. Ignore updates < 3 seconds apart.
+
+========================
+PART 6 — SPEED INTELLIGENCE
+========================
+
+1. Calculate speed using Haversine.
+2. Convert to km/h.
+3. Store in DB.
+4. Detect overspeed > 60 km/h.
+5. Maintain driver score (100 - overspeed*5).
+
+========================
+PART 7 — GEO-FENCING
+========================
+
+1. Add radius (default 300m) to stops.
+2. Detect ENTER and EXIT events.
+3. Store geo_events.
+4. Prevent duplicate events.
+
+Return only modified files.
+Explain changes briefly

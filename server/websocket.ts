@@ -37,7 +37,7 @@ interface ClientInfo {
 const clients = new Map<WebSocket, ClientInfo>();
 const latestLocations = new Map<string, LocationUpdate>();
 const OVERSPEED_THRESHOLD = 60; // km/h
-const GEOFENCE_RADIUS = 0.2; // 200 meters in km
+const GEOFENCE_RADIUS = 0.3; // 300 meters in km
 
 export function setupWebSocket(server: Server) {
   // ... existing setup ...
@@ -117,6 +117,23 @@ function handleSubscribe(ws: WebSocket, message: { routeId?: number }) {
   }
 }
 
+// Road snapping using OSRM
+async function snapToRoad(lat1: number, lng1: number, lat2: number, lng2: number): Promise<{ lat: number, lng: number }[]> {
+  try {
+    const url = `https://router.project-osrm.org/match/v1/driving/${lng1},${lat1};${lng2},${lat2}?geometries=geojson&overview=full`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
+      const coords = data.matchings[0].geometry.coordinates;
+      return coords.map((c: any) => ({ lng: c[0], lat: c[1] }));
+    }
+  } catch (error) {
+    console.error("OSRM matching failed:", error);
+  }
+  return [{ lat: lat2, lng: lng2 }];
+}
+
 async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss: WebSocketServer) {
   const clientInfo = clients.get(ws);
   if (clientInfo?.role !== "driver" || !clientInfo.tripId) {
@@ -126,12 +143,30 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
 
   const prevLocation = latestLocations.get(clientInfo.tripId);
   const now = Date.now();
-  let calculatedSpeed = message.speed || 0;
+  
+  // GPS Filtering
+  if (prevLocation) {
+    const timeDiff = (now - (prevLocation.timestamp || 0)) / 1000;
+    if (timeDiff < 3) return; // Ignore updates < 3s apart
 
-  // Calculate speed if not provided and we have a previous location
-  if (prevLocation && !message.speed) {
     const distance = calculateDistance(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
-    const timeDiff = (now - (prevLocation.timestamp || now)) / 1000 / 3600; // hours
+    if (distance > 0.3) return; // Ignore jumps > 300m
+  }
+
+  // Snap to road
+  let finalLat = message.lat;
+  let finalLng = message.lng;
+  if (prevLocation) {
+    const snapped = await snapToRoad(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
+    const lastPoint = snapped[snapped.length - 1];
+    finalLat = lastPoint.lat;
+    finalLng = lastPoint.lng;
+  }
+
+  let calculatedSpeed = message.speed || 0;
+  if (prevLocation && !message.speed) {
+    const distance = calculateDistance(prevLocation.lat, prevLocation.lng, finalLat, finalLng);
+    const timeDiff = (now - (prevLocation.timestamp || now)) / 1000 / 3600;
     if (timeDiff > 0) {
       calculatedSpeed = distance / timeDiff;
     }
@@ -141,8 +176,8 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
     tripId: clientInfo.tripId,
     routeId: message.routeId,
     busId: message.busId,
-    lat: message.lat,
-    lng: message.lng,
+    lat: finalLat,
+    lng: finalLng,
     speed: calculatedSpeed,
     heading: message.heading,
     accuracy: message.accuracy,
@@ -150,15 +185,13 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
   };
 
   latestLocations.set(clientInfo.tripId, locationData);
-
-  // Background analytics processing
   processAnalytics(clientInfo, locationData, prevLocation).catch(console.error);
 
   try {
     await storage.appendLiveLocation({
       tripId: clientInfo.tripId,
-      lat: message.lat,
-      lng: message.lng,
+      lat: finalLat,
+      lng: finalLng,
       speed: calculatedSpeed,
       heading: message.heading,
       accuracy: message.accuracy,
