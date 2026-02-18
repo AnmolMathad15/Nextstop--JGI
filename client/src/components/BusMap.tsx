@@ -79,28 +79,32 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       attributionControl: false
     });
 
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    // Wait for map to load before adding controls or markers that might need layers
+    map.on('load', () => {
+      map.addControl(new maplibregl.NavigationControl(), 'top-right');
+      
+      // College Marker
+      const el = document.createElement('div');
+      el.className = 'college-marker';
+      el.innerHTML = '🏫';
+      el.style.background = '#059669';
+      el.style.border = '3px solid white';
+      el.style.borderRadius = '50%';
+      el.style.width = '36px';
+      el.style.height = '36px';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.fontSize = '18px';
+      el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+
+      new maplibregl.Marker(el)
+        .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
+        .setPopup(new maplibregl.Popup().setHTML('JCET College - Destination'))
+        .addTo(map);
+    });
+
     mapRef.current = map;
-
-    // College Marker
-    const el = document.createElement('div');
-    el.className = 'college-marker';
-    el.innerHTML = '🏫';
-    el.style.background = '#059669';
-    el.style.border = '3px solid white';
-    el.style.borderRadius = '50%';
-    el.style.width = '36px';
-    el.style.height = '36px';
-    el.style.display = 'flex';
-    el.style.alignItems = 'center';
-    el.style.justifyContent = 'center';
-    el.style.fontSize = '18px';
-    el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-
-    new maplibregl.Marker(el)
-      .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
-      .setPopup(new maplibregl.Popup().setHTML('JCET College - Destination'))
-      .addTo(map);
 
     return () => {
       map.remove();

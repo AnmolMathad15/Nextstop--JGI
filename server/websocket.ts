@@ -122,6 +122,15 @@ async function snapToRoad(lat1: number, lng1: number, lat2: number, lng2: number
   try {
     const url = `https://router.project-osrm.org/match/v1/driving/${lng1},${lat1};${lng2},${lat2}?geometries=geojson&overview=full`;
     const response = await fetch(url);
+    
+    // Check if response is JSON
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const text = await response.text();
+      console.warn("OSRM returned non-JSON response:", text.substring(0, 100));
+      return [{ lat: lat2, lng: lng2 }];
+    }
+
     const data = await response.json();
     
     if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
