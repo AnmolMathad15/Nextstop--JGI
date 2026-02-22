@@ -73,7 +73,24 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: 'https://demotiles.maplibre.org/style.json',
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            attribution: "© OpenStreetMap contributors"
+          }
+        },
+        layers: [
+          {
+            id: "osm-layer",
+            type: "raster",
+            source: "osm"
+          }
+        ]
+      },
       center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat],
       zoom: 13,
       attributionControl: false
