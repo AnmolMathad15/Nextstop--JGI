@@ -48,9 +48,11 @@ interface BusMapProps {
 export default function BusMap({ routeId, selectedStop, showAllBuses = false, role = "student" }: BusMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const busMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+  const busMarkerRef = useRef<maplibregl.Marker | null>(null);
   const stopMarkersRef = useRef<maplibregl.Marker[]>([]);
   const lastRouteUpdateRef = useRef<number>(0);
+  const animationFrameRef = useRef<number | null>(null);
+  const prevCoordsRef = useRef<[number, number] | null>(null);
   
   const [searchQuery, setSearchQuery] = useState("");
   const [isMissed, setIsMissed] = useState(false);
@@ -68,6 +70,17 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
   const selectedStopData = routeData?.stops.find((s) => s.name === selectedStop);
 
+  const calculateBearing = (start: [number, number], end: [number, number]) => {
+    const startLat = start[1] * Math.PI / 180;
+    const startLng = start[0] * Math.PI / 180;
+    const endLat = end[1] * Math.PI / 180;
+    const endLng = end[0] * Math.PI / 180;
+    const y = Math.sin(endLng - startLng) * Math.cos(endLat);
+    const x = Math.cos(startLat) * Math.sin(endLat) -
+          Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  };
+
   const updateLiveRoute = useCallback(async (busLocation: LocationUpdate) => {
     const map = mapRef.current;
     if (!map || !map.loaded()) return;
@@ -84,98 +97,60 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       if (data.code === 'Ok' && data.routes?.length > 0) {
         const route = data.routes[0];
         const geometry = route.geometry;
-        const durationMinutes = Math.round(route.duration / 60);
-        setEta(durationMinutes);
+        setEta(Math.round(route.duration / 60));
 
-        const sourceId = 'live-route-source';
-        const layerId = 'live-route-layer';
-
-        if (map.getSource(sourceId)) {
-          (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData({
-            type: 'Feature',
-            properties: {},
-            geometry: geometry
-          });
+        const source = map.getSource('route') as maplibregl.GeoJSONSource;
+        if (source) {
+          source.setData(geometry);
         } else {
-          map.addSource(sourceId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              properties: {},
-              geometry: geometry
-            }
-          });
+          map.addSource('route', { type: 'geojson', data: geometry });
           map.addLayer({
-            id: layerId,
+            id: 'route-line',
             type: 'line',
-            source: sourceId,
+            source: 'route',
             layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': '#facc15', 'line-width': 4, 'line-opacity': 0.8, 'line-dasharray': [2, 1] }
+            paint: { 'line-color': '#3b82f6', 'line-width': 6, 'line-opacity': 0.8 }
           });
         }
       }
     } catch (error) {
-      console.error("Failed to fetch OSRM route:", error);
+      console.error("OSRM Route Error:", error);
     }
   }, []);
 
-  const updateRouteLayer = (map: maplibregl.Map, coords: [number, number][]) => {
-    const sourceId = 'route-source';
-    const layerId = 'route-layer';
-
-    if (map.getSource(sourceId)) {
-      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData({
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: coords }
-      });
-    } else {
-      map.addSource(sourceId, {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: coords }
-        }
-      });
-      map.addLayer({
-        id: layerId,
-        type: 'line',
-        source: sourceId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#0f766e', 'line-width': 5, 'line-opacity': 0.8 }
-      });
-    }
-  };
-
-  const animateMarker = (marker: maplibregl.Marker, targetCoords: [number, number], heading: number) => {
+  const animateMarker = useCallback((targetCoords: [number, number], heading?: number) => {
+    if (!busMarkerRef.current) return;
+    const marker = busMarkerRef.current;
     const startCoords = marker.getLngLat();
     const startTime = performance.now();
     const duration = 3000;
+
+    const startLngLat = [startCoords.lng, startCoords.lat] as [number, number];
+    const finalHeading = heading ?? (prevCoordsRef.current ? calculateBearing(prevCoordsRef.current, targetCoords) : 0);
+    prevCoordsRef.current = targetCoords;
 
     const frame = (now: number) => {
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / duration, 1);
 
-      const lng = startCoords.lng + (targetCoords[0] - startCoords.lng) * progress;
-      const lat = startCoords.lat + (targetCoords[1] - startCoords.lat) * progress;
+      const lng = startLngLat[0] + (targetCoords[0] - startLngLat[0]) * progress;
+      const lat = startLngLat[1] + (targetCoords[1] - startLngLat[1]) * progress;
 
       marker.setLngLat([lng, lat]);
-      
       const el = marker.getElement();
-      el.style.transform = `rotate(${heading}deg)`;
+      el.style.transform = `rotate(${finalHeading}deg)`;
 
       if (progress < 1) {
-        requestAnimationFrame(frame);
+        animationFrameRef.current = requestAnimationFrame(frame);
       }
     };
 
-    requestAnimationFrame(frame);
-  };
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = requestAnimationFrame(frame);
+  }, []);
 
-  // Initialize Map
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -189,13 +164,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
             attribution: "© OpenStreetMap contributors"
           }
         },
-        layers: [
-          {
-            id: "osm-layer",
-            type: "raster",
-            source: "osm"
-          }
-        ]
+        layers: [{ id: "osm", type: "raster", source: "osm" }]
       },
       center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat],
       zoom: 13,
@@ -208,132 +177,50 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       const el = document.createElement('div');
       el.className = 'college-marker';
       el.innerHTML = '🏫';
-      el.style.background = '#059669';
-      el.style.border = '3px solid white';
-      el.style.borderRadius = '50%';
-      el.style.width = '36px';
-      el.style.height = '36px';
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-      el.style.fontSize = '18px';
-      el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+      Object.assign(el.style, {
+        background: '#059669', border: '3px solid white', borderRadius: '50%',
+        width: '36px', height: '36px', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', fontSize: '18px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+      });
 
       new maplibregl.Marker(el)
         .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
-        .setPopup(new maplibregl.Popup().setHTML('JCET College - Destination'))
+        .setPopup(new maplibregl.Popup().setHTML('JCET College'))
         .addTo(map);
     });
 
     mapRef.current = map;
-
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
+    return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // Update Route and Stops
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !routeData) return;
+    if (!map || locations.length === 0) return;
 
-    stopMarkersRef.current.forEach(m => m.remove());
-    stopMarkersRef.current = [];
+    const loc = locations[0];
+    if (!busMarkerRef.current) {
+      const el = document.createElement('div');
+      el.className = 'bus-marker';
+      el.innerHTML = '🚌';
+      Object.assign(el.style, {
+        background: '#facc15', border: '3px solid #854d0e', borderRadius: '50%',
+        width: '40px', height: '40px', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', fontSize: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+      });
 
-    const coords = routeData.stops.map(s => [s.lng, s.lat] as [number, number]);
-
-    if (map.loaded()) {
-      updateRouteLayer(map, coords);
-    } else {
-      map.on('load', () => updateRouteLayer(map, coords));
+      busMarkerRef.current = new maplibregl.Marker(el)
+        .setLngLat([loc.lng, loc.lat])
+        .setPopup(new maplibregl.Popup().setHTML(`<strong>Bus: ${loc.busId}</strong>`))
+        .addTo(map);
     }
 
-    routeData.stops.forEach(stop => {
-      const isSelected = stop.name === selectedStop;
-      const el = document.createElement('div');
-      el.className = isSelected ? 'selected-stop-marker' : 'stop-marker';
-      
-      if (isSelected) {
-        el.style.background = '#facc15';
-        el.style.border = '3px solid #854d0e';
-        el.style.boxShadow = '0 0 12px rgba(250,204,21,0.8)';
-        el.style.width = '28px';
-        el.style.height = '28px';
-      } else {
-        el.style.background = '#0f766e';
-        el.style.border = '2px solid white';
-        el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-        el.style.width = '20px';
-        el.style.height = '20px';
-      }
-      el.style.borderRadius = '50%';
-
-      const marker = new maplibregl.Marker(el)
-        .setLngLat([stop.lng, stop.lat])
-        .setPopup(new maplibregl.Popup().setHTML(`<strong>${stop.name}</strong><br/>Scheduled: ${stop.scheduledTime}`))
-        .addTo(map);
-      
-      stopMarkersRef.current.push(marker);
-    });
-
-  }, [routeData, selectedStop]);
-
-  // Update Bus Markers (Live)
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    locations.forEach(loc => {
-      let marker = busMarkersRef.current.get(loc.tripId);
-      
-      if (!marker) {
-        const el = document.createElement('div');
-        el.className = 'bus-marker';
-        el.innerHTML = '🚌';
-        el.style.background = '#facc15';
-        el.style.border = '3px solid #854d0e';
-        el.style.borderRadius = '50%';
-        el.style.width = '40px';
-        el.style.height = '40px';
-        el.style.display = 'flex';
-        el.style.alignItems = 'center';
-        el.style.justifyContent = 'center';
-        el.style.fontSize = '20px';
-        el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-        el.style.transition = 'transform 0.5s linear';
-
-        marker = new maplibregl.Marker(el)
-          .setLngLat([loc.lng, loc.lat])
-          .setPopup(new maplibregl.Popup().setHTML(`<strong>Bus: ${loc.busId}</strong><br/>Route: ${loc.routeId}`))
-          .addTo(map);
-        
-        busMarkersRef.current.set(loc.tripId, marker);
-      } else {
-        animateMarker(marker, [loc.lng, loc.lat], loc.heading || 0);
-      }
-
-      if (!showAllBuses || locations.length === 1) {
-        updateLiveRoute(loc);
-      }
-    });
-
-    const activeTripIds = new Set(locations.map(l => l.tripId));
-    busMarkersRef.current.forEach((marker, tripId) => {
-      if (!activeTripIds.has(tripId)) {
-        marker.remove();
-        busMarkersRef.current.delete(tripId);
-        
-        if (map.getSource('live-route-source')) {
-          (map.getSource('live-route-source') as maplibregl.GeoJSONSource).setData({
-            type: 'FeatureCollection',
-            features: []
-          });
-          setEta(null);
-        }
-      }
-    });
-  }, [locations, updateLiveRoute, showAllBuses]);
+    animateMarker([loc.lng, loc.lat], loc.heading);
+    updateLiveRoute(loc);
+    
+    if (role === "student" && mapRef.current) {
+      mapRef.current.easeTo({ center: [loc.lng, loc.lat], duration: 1000 });
+    }
+  }, [locations, updateLiveRoute, animateMarker, role]);
 
   useEffect(() => {
     if (selectedStopData) {
@@ -346,33 +233,23 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
   }, [selectedStopData]);
 
   return (
-    <div className="relative w-full" style={{ height: "100vh", minHeight: "100vh" }} data-testid="bus-map">
+    <div className="relative w-full h-screen" data-testid="bus-map">
       {isMissed && routeData && selectedStopData && (
-        <div className="absolute top-4 left-4 right-4 z-[1000]">
-          <MissedBusAlert
-            routeName={routeData.name}
-            stopName={selectedStopData.name}
-            departureTime={selectedStopData.scheduledTime}
-          />
+        <div className="absolute top-4 left-4 right-4 z-50">
+          <MissedBusAlert routeName={routeData.name} stopName={selectedStopData.name} departureTime={selectedStopData.scheduledTime} />
         </div>
       )}
 
-      <div className="absolute top-4 left-4 right-4 z-[1000]" style={{ top: isMissed ? "140px" : "16px" }}>
+      <div className="absolute top-4 left-4 right-4 z-50" style={{ top: isMissed ? "140px" : "16px" }}>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-          <Input
-            type="search"
-            placeholder="Search destination or stop"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-full pl-10 pr-4 py-3 bg-white shadow-lg border-none focus:ring-2 focus:ring-yellow-400"
-            data-testid="input-search-map"
-          />
+          <Input type="search" placeholder="Search destination" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-full pl-10 pr-4 py-3 bg-white shadow-lg border-none focus:ring-2 focus:ring-yellow-400" />
         </div>
       </div>
 
       {selectedStopData && eta !== null && !isMissed && (
-        <div className="absolute top-20 left-4 right-4 z-[1000] bg-white/95 backdrop-blur rounded-lg p-4 shadow-lg" style={{ top: isMissed ? "200px" : "80px" }}>
+        <div className="absolute top-20 left-4 right-4 z-50 bg-white/95 backdrop-blur rounded-lg p-4 shadow-lg" style={{ top: isMissed ? "200px" : "80px" }}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Your Stop</p>
@@ -384,11 +261,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Expected arrival: <span className="font-medium" data-testid="text-arrival-time">
-                {new Date(Date.now() + eta * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            </p>
+            <p className="text-xs text-muted-foreground"> Expected arrival: <span className="font-medium">{new Date(Date.now() + eta * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></p>
             <span className={`text-xs px-2 py-1 rounded-full ${isConnected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
               {isConnected ? "Live" : "Offline"}
             </span>
@@ -398,36 +271,13 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
       <div ref={mapContainerRef} className="w-full h-full" />
       
-      <div className="absolute bottom-28 right-4 z-[1000] flex flex-col gap-2">
+      <div className="absolute bottom-28 right-4 z-50 flex flex-col gap-2">
         <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-md">
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => mapRef.current?.zoomIn()}
-            className="h-11 w-11 rounded-none"
-            data-testid="button-zoom-in"
-          >
-            <Plus className="h-5 w-5" />
-          </Button>
-          <hr className="border-gray-200" />
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => mapRef.current?.zoomOut()}
-            className="h-11 w-11 rounded-none"
-            data-testid="button-zoom-out"
-          >
-            <Minus className="h-5 w-5" />
-          </Button>
+          <Button size="icon" variant="ghost" onClick={() => mapRef.current?.zoomIn()} className="h-11 w-11 rounded-none"><Plus className="h-5 w-5" /></Button>
+          <hr className="border-gray-200" /><Button size="icon" variant="ghost" onClick={() => mapRef.current?.zoomOut()} className="h-11 w-11 rounded-none"><Minus className="h-5 w-5" /></Button>
         </div>
-        <Button
-          size="icon"
-          onClick={() => mapRef.current?.flyTo({ center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat], zoom: 14 })}
-          className="h-11 w-11 rounded-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 shadow-md"
-          data-testid="button-center-map"
-        >
-          <Navigation className="h-5 w-5" />
-        </Button>
+        <Button size="icon" onClick={() => mapRef.current?.flyTo({ center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat], zoom: 14 })}
+          className="h-11 w-11 rounded-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 shadow-md"><Navigation className="h-5 w-5" /></Button>
       </div>
     </div>
   );

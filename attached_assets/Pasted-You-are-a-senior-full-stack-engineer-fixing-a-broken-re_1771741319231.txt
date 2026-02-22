@@ -1,0 +1,102 @@
+You are a senior full-stack engineer fixing a broken real-time bus tracking system using MapLibre GL + OSRM.
+
+STRICT RULES:
+- Do NOT change UI layout.
+- Preserve bottom navigation and overlays.
+- Do NOT regenerate project.
+- Only fix map engine, routing, live tracking, and ETA.
+- Keep WebSocket architecture intact.
+
+CURRENT ISSUES:
+- Bus live marker not showing.
+- Route to college not drawing.
+- ETA not visible.
+- OSRM route not updating.
+- WebSocket location not reflected on map.
+
+OBJECTIVE:
+Make the map behave like Google Maps with smooth movement, visible route, and accurate ETA.
+
+========================
+PART 1 — MAP INITIALIZATION
+========================
+
+1. Ensure map initializes only once using useRef.
+2. Wait for map.on("load") before adding sources or layers.
+3. Add navigation control.
+4. Do not recreate map instance.
+
+========================
+PART 2 — LIVE BUS MARKER
+========================
+
+1. Create bus marker once using new maplibregl.Marker().
+2. Store in useRef.
+3. Update position using setLngLat().
+4. Rotate marker based on heading.
+5. If no heading, calculate bearing from previous coordinate.
+6. Ensure marker updates when WebSocket emits location.
+7. Prevent re-render dependency loops.
+
+========================
+PART 3 — ROUTE TO COLLEGE (OSRM)
+========================
+
+1. On each location update:
+   - Call OSRM route endpoint:
+     https://router.project-osrm.org/route/v1/driving/{busLng},{busLat};{collegeLng},{collegeLat}?overview=full&geometries=geojson
+2. Throttle API calls to once every 3 seconds.
+3. Extract routes[0].geometry.
+4. Add map source named "route" if not exists.
+5. Add layer named "route-line" if not exists.
+6. Update route using:
+   map.getSource("route").setData(geojson);
+7. Do NOT recreate layer on every update.
+8. Remove previous geometry only via setData().
+
+========================
+PART 4 — SMOOTH ANIMATION
+========================
+
+1. Animate marker along route geometry.
+2. Use requestAnimationFrame.
+3. Prevent overlapping animations.
+4. Sync animation duration with 3-second interval.
+5. Use map.easeTo() for camera follow.
+
+========================
+PART 5 — ETA CALCULATION
+========================
+
+1. Use OSRM response:
+   routes[0].distance (meters)
+   routes[0].duration (seconds)
+2. Convert duration to minutes.
+3. Update ETA display component.
+4. Recalculate ETA on every route refresh.
+5. Fallback to previous ETA if OSRM fails.
+
+========================
+PART 6 — WEBSOCKET FIX
+========================
+
+1. Ensure WebSocket listener updates bus location state.
+2. Validate coordinates before updating.
+3. Ignore invalid or null location data.
+4. Log errors if WebSocket not receiving data.
+
+========================
+PART 7 — FAILSAFE
+========================
+
+1. If OSRM fails:
+   - Do not crash.
+   - Keep last route.
+   - Continue updating marker.
+2. If no WebSocket data:
+   - Show "Offline" badge.
+3. If map source missing:
+   - Create it before updating.
+
+Return only modified BusMap component and any backend routing fix.
+Explain what was fixed.
