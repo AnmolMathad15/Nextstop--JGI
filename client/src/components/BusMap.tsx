@@ -50,10 +50,11 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
   const mapRef = useRef<maplibregl.Map | null>(null);
   const busMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const stopMarkersRef = useRef<maplibregl.Marker[]>([]);
-  const routeLineRef = useRef<string | null>(null);
+  const lastRouteUpdateRef = useRef<number>(0);
   
   const [searchQuery, setSearchQuery] = useState("");
   const [isMissed, setIsMissed] = useState(false);
+  const [eta, setEta] = useState<number | null>(null);
 
   const { data: routeData } = useQuery<RouteWithStops>({
     queryKey: ["/api/routes", routeId],
@@ -66,6 +67,111 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
   });
 
   const selectedStopData = routeData?.stops.find((s) => s.name === selectedStop);
+
+  const updateLiveRoute = useCallback(async (busLocation: LocationUpdate) => {
+    const map = mapRef.current;
+    if (!map || !map.loaded()) return;
+
+    const now = Date.now();
+    if (now - lastRouteUpdateRef.current < 3000) return;
+    lastRouteUpdateRef.current = now;
+
+    try {
+      const url = `https://router.project-osrm.org/route/v1/driving/${busLocation.lng},${busLocation.lat};${JCET_COLLEGE_COORDS.lng},${JCET_COLLEGE_COORDS.lat}?overview=full&geometries=geojson`;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.code === 'Ok' && data.routes?.length > 0) {
+        const route = data.routes[0];
+        const geometry = route.geometry;
+        const durationMinutes = Math.round(route.duration / 60);
+        setEta(durationMinutes);
+
+        const sourceId = 'live-route-source';
+        const layerId = 'live-route-layer';
+
+        if (map.getSource(sourceId)) {
+          (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData({
+            type: 'Feature',
+            properties: {},
+            geometry: geometry
+          });
+        } else {
+          map.addSource(sourceId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: geometry
+            }
+          });
+          map.addLayer({
+            id: layerId,
+            type: 'line',
+            source: sourceId,
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#facc15', 'line-width': 4, 'line-opacity': 0.8, 'line-dasharray': [2, 1] }
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch OSRM route:", error);
+    }
+  }, []);
+
+  const updateRouteLayer = (map: maplibregl.Map, coords: [number, number][]) => {
+    const sourceId = 'route-source';
+    const layerId = 'route-layer';
+
+    if (map.getSource(sourceId)) {
+      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: coords }
+      });
+    } else {
+      map.addSource(sourceId, {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: coords }
+        }
+      });
+      map.addLayer({
+        id: layerId,
+        type: 'line',
+        source: sourceId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#0f766e', 'line-width': 5, 'line-opacity': 0.8 }
+      });
+    }
+  };
+
+  const animateMarker = (marker: maplibregl.Marker, targetCoords: [number, number], heading: number) => {
+    const startCoords = marker.getLngLat();
+    const startTime = performance.now();
+    const duration = 3000;
+
+    const frame = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      const lng = startCoords.lng + (targetCoords[0] - startCoords.lng) * progress;
+      const lat = startCoords.lat + (targetCoords[1] - startCoords.lat) * progress;
+
+      marker.setLngLat([lng, lat]);
+      
+      const el = marker.getElement();
+      el.style.transform = `rotate(${heading}deg)`;
+
+      if (progress < 1) {
+        requestAnimationFrame(frame);
+      }
+    };
+
+    requestAnimationFrame(frame);
+  };
 
   // Initialize Map
   useEffect(() => {
@@ -96,11 +202,9 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       attributionControl: false
     });
 
-    // Wait for map to load before adding controls or markers that might need layers
     map.on('load', () => {
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
       
-      // College Marker
       const el = document.createElement('div');
       el.className = 'college-marker';
       el.innerHTML = '🏫';
@@ -134,20 +238,17 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     const map = mapRef.current;
     if (!map || !routeData) return;
 
-    // Clear old markers
     stopMarkersRef.current.forEach(m => m.remove());
     stopMarkersRef.current = [];
 
     const coords = routeData.stops.map(s => [s.lng, s.lat] as [number, number]);
 
-    // Route Line
     if (map.loaded()) {
       updateRouteLayer(map, coords);
     } else {
       map.on('load', () => updateRouteLayer(map, coords));
     }
 
-    // Stop Markers
     routeData.stops.forEach(stop => {
       const isSelected = stop.name === selectedStop;
       const el = document.createElement('div');
@@ -178,35 +279,6 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
   }, [routeData, selectedStop]);
 
-  const updateRouteLayer = (map: maplibregl.Map, coords: [number, number][]) => {
-    const sourceId = 'route-source';
-    const layerId = 'route-layer';
-
-    if (map.getSource(sourceId)) {
-      (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData({
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: coords }
-      });
-    } else {
-      map.addSource(sourceId, {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: coords }
-        }
-      });
-      map.addLayer({
-        id: layerId,
-        type: 'line',
-        source: sourceId,
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#0f766e', 'line-width': 5, 'line-opacity': 0.8 }
-      });
-    }
-  };
-
   // Update Bus Markers (Live)
   useEffect(() => {
     const map = mapRef.current;
@@ -229,7 +301,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
         el.style.justifyContent = 'center';
         el.style.fontSize = '20px';
         el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-        el.style.transition = 'transform 3s linear';
+        el.style.transition = 'transform 0.5s linear';
 
         marker = new maplibregl.Marker(el)
           .setLngLat([loc.lng, loc.lat])
@@ -238,45 +310,30 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
         
         busMarkersRef.current.set(loc.tripId, marker);
       } else {
-        // Animate movement
         animateMarker(marker, [loc.lng, loc.lat], loc.heading || 0);
+      }
+
+      if (!showAllBuses || locations.length === 1) {
+        updateLiveRoute(loc);
       }
     });
 
-    // Remove offline buses
     const activeTripIds = new Set(locations.map(l => l.tripId));
     busMarkersRef.current.forEach((marker, tripId) => {
       if (!activeTripIds.has(tripId)) {
         marker.remove();
         busMarkersRef.current.delete(tripId);
+        
+        if (map.getSource('live-route-source')) {
+          (map.getSource('live-route-source') as maplibregl.GeoJSONSource).setData({
+            type: 'FeatureCollection',
+            features: []
+          });
+          setEta(null);
+        }
       }
     });
-  }, [locations]);
-
-  const animateMarker = (marker: maplibregl.Marker, targetCoords: [number, number], heading: number) => {
-    const startCoords = marker.getLngLat();
-    const startTime = performance.now();
-    const duration = 3000;
-
-    const frame = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      const lng = startCoords.lng + (targetCoords[0] - startCoords.lng) * progress;
-      const lat = startCoords.lat + (targetCoords[1] - startCoords.lat) * progress;
-
-      marker.setLngLat([lng, lat]);
-      
-      const el = marker.getElement();
-      el.style.transform = `rotate(${heading}deg)`;
-
-      if (progress < 1) {
-        requestAnimationFrame(frame);
-      }
-    };
-
-    requestAnimationFrame(frame);
-  };
+  }, [locations, updateLiveRoute, showAllBuses]);
 
   useEffect(() => {
     if (selectedStopData) {
@@ -287,18 +344,6 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       setIsMissed(now > scheduledDate && now.getHours() < 12);
     }
   }, [selectedStopData]);
-
-  const calculateETA = () => {
-    if (!selectedStopData || locations.length === 0) return null;
-    const busLocation = locations[0];
-    const distance = Math.sqrt(
-      Math.pow(busLocation.lat - selectedStopData.lat, 2) +
-      Math.pow(busLocation.lng - selectedStopData.lng, 2)
-    );
-    return Math.max(1, Math.round(distance * 500));
-  };
-
-  const eta = calculateETA();
 
   return (
     <div className="relative w-full" style={{ height: "100vh", minHeight: "100vh" }} data-testid="bus-map">
@@ -353,7 +398,6 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
       <div ref={mapContainerRef} className="w-full h-full" />
       
-      {/* Custom Map Controls */}
       <div className="absolute bottom-28 right-4 z-[1000] flex flex-col gap-2">
         <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-md">
           <Button

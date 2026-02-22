@@ -106,6 +106,9 @@ export const ROUTES_DATA = [
   },
 ];
 
-export const JCET_COLLEGE_COORDS = { lat: 15.3820, lng: 75.1450 };
+export const JCET_COLLEGE_COORDS = {
+  lat: 15.394147,
+  lng: 75.118946
+};
 
 export const HUBLI_CENTER = { lat: 15.3647, lng: 75.1240 };
