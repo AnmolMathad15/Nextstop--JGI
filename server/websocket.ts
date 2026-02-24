@@ -117,29 +117,7 @@ function handleSubscribe(ws: WebSocket, message: { routeId?: number }) {
   }
 }
 
-// Road snapping using OSRM
-async function snapToRoad(lat1: number, lng1: number, lat2: number, lng2: number): Promise<{ lat: number, lng: number }[]> {
-  try {
-    const url = `https://router.project-osrm.org/match/v1/driving/${lng1},${lat1};${lng2},${lat2}?geometries=geojson&overview=full`;
-    const response = await fetch(url);
-    
-    // Check if response is JSON
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      const text = await response.text();
-      console.warn("OSRM returned non-JSON response:", text.substring(0, 100));
-      return [{ lat: lat2, lng: lng2 }];
-    }
-
-    const data = await response.json();
-    
-    if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
-      const coords = data.matchings[0].geometry.coordinates;
-      return coords.map((c: any) => ({ lng: c[0], lat: c[1] }));
-    }
-  } catch (error) {
-    console.error("OSRM matching failed:", error);
-  }
+function snapToRoad(_lat1: number, _lng1: number, lat2: number, lng2: number): { lat: number, lng: number }[] {
   return [{ lat: lat2, lng: lng2 }];
 }
 
@@ -162,11 +140,10 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
     if (distance > 0.3) return; // Ignore jumps > 300m
   }
 
-  // Snap to road
   let finalLat = message.lat;
   let finalLng = message.lng;
   if (prevLocation) {
-    const snapped = await snapToRoad(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
+    const snapped = snapToRoad(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
     const lastPoint = snapped[snapped.length - 1];
     finalLat = lastPoint.lat;
     finalLng = lastPoint.lng;
