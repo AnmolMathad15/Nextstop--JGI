@@ -49,7 +49,9 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const busMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const stopMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const routeLineRef = useRef<string | null>(null);
   const lastRouteUpdateRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
   const prevCoordsRef = useRef<[number, number] | null>(null);
@@ -83,40 +85,75 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
   const updateLiveRoute = useCallback(async (busLocation: LocationUpdate) => {
     const map = mapRef.current;
-    if (!map || !map.loaded()) return;
+    if (!map || !map.loaded() || !routeData) return;
 
-    const now = Date.now();
-    if (now - lastRouteUpdateRef.current < 3000) return;
-    lastRouteUpdateRef.current = now;
+    // Fixed route display logic
+    const stops = [...routeData.stops].sort((a, b) => a.sequence - b.sequence);
+    const coordinates = stops.map(s => [s.lng, s.lat]);
+    
+    const geojson: GeoJSON.Feature = {
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: coordinates
+      },
+      properties: {}
+    };
 
-    try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${busLocation.lng},${busLocation.lat};${JCET_COLLEGE_COORDS.lng},${JCET_COLLEGE_COORDS.lat}?overview=full&geometries=geojson`;
-      const response = await fetch(url);
-      const data = await response.json();
-
-      if (data.code === 'Ok' && data.routes?.length > 0) {
-        const route = data.routes[0];
-        const geometry = route.geometry;
-        setEta(Math.round(route.duration / 60));
-
-        const source = map.getSource('route') as maplibregl.GeoJSONSource;
-        if (source) {
-          source.setData(geometry);
-        } else {
-          map.addSource('route', { type: 'geojson', data: geometry });
-          map.addLayer({
-            id: 'route-line',
-            type: 'line',
-            source: 'route',
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': '#3b82f6', 'line-width': 6, 'line-opacity': 0.8 }
-          });
-        }
-      }
-    } catch (error) {
-      console.error("OSRM Route Error:", error);
+    const source = map.getSource('route') as maplibregl.GeoJSONSource;
+    if (source) {
+      source.setData(geojson);
+    } else {
+      map.addSource('route', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#14b8a6', 'line-width': 5, 'line-opacity': 0.8 }
+      });
     }
-  }, []);
+
+    // ETA calculation based on stop order
+    if (selectedStopData) {
+      const busIdx = findNearestStopIndex(busLocation, stops);
+      const targetIdx = stops.findIndex(s => s.id === selectedStopData.id);
+
+      if (busIdx > targetIdx) {
+        setEta(-1); // Passed
+      } else {
+        let totalDist = 0;
+        for (let i = busIdx; i < targetIdx; i++) {
+          totalDist += calculateDistance(stops[i].lat, stops[i].lng, stops[i+1].lat, stops[i+1].lng);
+        }
+        const speed = busLocation.speed || 30; // fallback 30km/h
+        setEta(Math.round((totalDist / speed) * 60));
+      }
+    }
+  }, [routeData, selectedStopData]);
+
+  const findNearestStopIndex = (loc: {lat: number, lng: number}, stops: RouteStop[]) => {
+    let minD = Infinity;
+    let idx = 0;
+    stops.forEach((s, i) => {
+      const d = calculateDistance(loc.lat, loc.lng, s.lat, s.lng);
+      if (d < minD) {
+        minD = d;
+        idx = i;
+      }
+    });
+    return idx;
+  };
+
+  function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
 
   const animateMarker = useCallback((targetCoords: [number, number], heading?: number) => {
     if (!busMarkerRef.current) return;
@@ -176,17 +213,35 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       
       const el = document.createElement('div');
       el.className = 'college-marker';
-      el.innerHTML = '🏫';
-      Object.assign(el.style, {
-        background: '#059669', border: '3px solid white', borderRadius: '50%',
-        width: '36px', height: '36px', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontSize: '18px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-      });
+      el.style.backgroundImage = 'url(/icons/college.png)';
+      el.style.width = '35px';
+      el.style.height = '35px';
+      el.style.backgroundSize = 'contain';
+      el.style.backgroundRepeat = 'no-repeat';
 
       new maplibregl.Marker(el)
         .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
         .setPopup(new maplibregl.Popup().setHTML('JCET College'))
         .addTo(map);
+
+      // User location
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition((position) => {
+          const { latitude, longitude } = position.coords;
+          const userEl = document.createElement('div');
+          userEl.className = 'user-marker';
+          Object.assign(userEl.style, {
+            width: '15px', height: '15px', borderRadius: '50%',
+            backgroundColor: '#3b82f6', border: '2px solid white',
+            boxShadow: '0 0 10px rgba(59, 130, 246, 0.5)'
+          });
+          userMarkerRef.current = new maplibregl.Marker(userEl)
+            .setLngLat([longitude, latitude])
+            .addTo(map);
+          
+          map.easeTo({ center: [longitude, latitude], zoom: 14 });
+        });
+      }
     });
 
     mapRef.current = map;
@@ -201,12 +256,12 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     if (!busMarkerRef.current) {
       const el = document.createElement('div');
       el.className = 'bus-marker';
-      el.innerHTML = '🚌';
-      Object.assign(el.style, {
-        background: '#facc15', border: '3px solid #854d0e', borderRadius: '50%',
-        width: '40px', height: '40px', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', fontSize: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-      });
+      el.style.backgroundImage = 'url(/icons/yellow-bus.png)';
+      el.style.width = '40px';
+      el.style.height = '40px';
+      el.style.backgroundSize = 'contain';
+      el.style.backgroundRepeat = 'no-repeat';
+      el.style.transition = 'transform 0.3s ease-out';
 
       busMarkerRef.current = new maplibregl.Marker(el)
         .setLngLat([loc.lng, loc.lat])
@@ -257,11 +312,15 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
             </div>
             <div className="text-right">
               <p className="text-sm text-muted-foreground">ETA</p>
-              <p className="text-2xl font-bold text-primary" data-testid="text-eta">{eta} min</p>
+              <p className="text-2xl font-bold text-primary" data-testid="text-eta">
+                {eta === -1 ? "Passed" : `${eta} min`}
+              </p>
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground"> Expected arrival: <span className="font-medium">{new Date(Date.now() + eta * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></p>
+            <p className="text-xs text-muted-foreground"> 
+              {eta === -1 ? "Bus has already passed your stop" : `Expected arrival: ${new Date(Date.now() + eta * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+            </p>
             <span className={`text-xs px-2 py-1 rounded-full ${isConnected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
               {isConnected ? "Live" : "Offline"}
             </span>
