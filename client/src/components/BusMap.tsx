@@ -8,8 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
 import MissedBusAlert from "./MissedBusAlert";
-import jgiLogo from "@assets/ChatGPT_Image_Feb_26,_2026,_10_28_00_PM_1772162764864.png";
-import busIcon from "@assets/bus_1772162905635.jpeg";
+import jgiLogo from "@/assets/jgi-logo.png";
+import busIcon from "@/assets/bus-icon.jpeg";
 
 interface RouteStop {
   id: number;
