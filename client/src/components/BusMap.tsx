@@ -213,11 +213,12 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       
       const el = document.createElement('div');
       el.className = 'college-marker';
-      el.style.backgroundImage = 'url(/icons/college.png)';
+      el.style.backgroundImage = 'url(/icons/jgi-logo.png)';
       el.style.width = '35px';
       el.style.height = '35px';
       el.style.backgroundSize = 'contain';
       el.style.backgroundRepeat = 'no-repeat';
+      el.style.cursor = 'pointer';
 
       new maplibregl.Marker(el)
         .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
