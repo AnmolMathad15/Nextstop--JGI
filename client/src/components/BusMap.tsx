@@ -8,6 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
 import MissedBusAlert from "./MissedBusAlert";
+import jgiLogo from "@assets/ChatGPT_Image_Feb_26,_2026,_10_28_00_PM_1772162764864.png";
+import busIcon from "@assets/bus_1772162905635.jpeg";
 
 interface RouteStop {
   id: number;
@@ -213,12 +215,15 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       
       const el = document.createElement('div');
       el.className = 'college-marker';
-      el.style.backgroundImage = 'url(/icons/jgi-logo.png)';
-      el.style.width = '35px';
-      el.style.height = '35px';
+      el.style.backgroundImage = `url(${jgiLogo})`;
+      el.style.width = '45px';
+      el.style.height = '45px';
       el.style.backgroundSize = 'contain';
       el.style.backgroundRepeat = 'no-repeat';
       el.style.cursor = 'pointer';
+      el.style.borderRadius = '50%';
+      el.style.backgroundColor = 'white';
+      el.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
 
       new maplibregl.Marker(el)
         .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
@@ -257,12 +262,13 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     if (!busMarkerRef.current) {
       const el = document.createElement('div');
       el.className = 'bus-marker';
-      el.style.backgroundImage = 'url(/icons/yellow-bus.png)';
-      el.style.width = '40px';
-      el.style.height = '40px';
+      el.style.backgroundImage = `url(${busIcon})`;
+      el.style.width = '50px';
+      el.style.height = '50px';
       el.style.backgroundSize = 'contain';
       el.style.backgroundRepeat = 'no-repeat';
       el.style.transition = 'transform 0.3s ease-out';
+      el.style.cursor = 'pointer';
 
       busMarkerRef.current = new maplibregl.Marker(el)
         .setLngLat([loc.lng, loc.lat])
