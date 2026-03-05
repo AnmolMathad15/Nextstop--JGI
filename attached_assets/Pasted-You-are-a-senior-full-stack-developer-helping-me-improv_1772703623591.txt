@@ -1,0 +1,142 @@
+You are a senior full-stack developer helping me improve my college project called **NextStop JGI**, a live bus tracking system similar to train tracking apps.
+
+The project currently has a map that shows bus location using the driver's mobile GPS. I want to upgrade the system to make it smoother, cleaner, and closer to a professional transit tracking app.
+
+Implement the following improvements.
+
+---
+
+1️⃣ SMOOTH REAL-TIME MAP UPDATES
+
+The current system updates location poorly when the bus moves.
+
+Implement real-time tracking using **WebSockets (Socket.io)** instead of HTTP polling.
+
+Backend:
+
+* Create a WebSocket server.
+* When new GPS coordinates are received, broadcast them to all connected clients.
+
+Frontend:
+
+* Listen for WebSocket events.
+* Update the bus marker position smoothly.
+* Animate movement instead of jumping markers.
+
+---
+
+2️⃣ CUSTOM BUS AND COLLEGE MARKERS
+
+Do NOT use the default blue Google Maps marker.
+
+Use custom marker icons.
+
+The images will be uploaded in the project folder:
+
+/assets/bus.png
+/assets/college.png
+
+Requirements:
+
+* Bus marker uses bus.png
+* College marker uses college.png
+* Bus marker updates live as location updates.
+
+---
+
+3️⃣ FIXED BUS STOPS WITH MARKERS
+
+Add predefined bus stops with exact coordinates.
+
+Example format:
+
+const busStops = [
+{ name: "JGI College", lat: 12.9716, lng: 77.5946 },
+{ name: "Thodankeri Stop", lat: XX.XXXX, lng: XX.XXXX },
+{ name: "Stop 3", lat: XX.XXXX, lng: XX.XXXX }
+];
+
+Requirements:
+
+* Display markers for all stops.
+* Use a different icon for stops.
+* When the bus is within 100 meters of a stop, highlight that stop.
+
+---
+
+4️⃣ VERTICAL ROUTE TIMELINE (IRCTC STYLE)
+
+Add a UI component next to the map showing route progress.
+
+Design:
+Vertical line with dots.
+
+Each stop has 3 states:
+
+Green → bus already crossed
+Blue → current stop
+Grey → upcoming stop
+
+Example:
+
+● JGI College (Completed)
+● Thodankeri (Bus approaching)
+○ Next Stop
+
+The timeline updates automatically based on bus location.
+
+---
+
+5️⃣ GPS JITTER PROTECTION
+
+Add validation in backend.
+
+If a new GPS coordinate requires the bus to move faster than 150 km/h between updates:
+
+Ignore that coordinate.
+
+This prevents GPS glitches.
+
+---
+
+6️⃣ DEAD SIGNAL DETECTION
+
+If no GPS data is received for more than **60 seconds**:
+
+Frontend should display:
+
+"Signal Lost – Last seen at [time]"
+
+Bus marker should turn grey.
+
+---
+
+7️⃣ TEST MODE (UNTIL GPS DEVICE ARRIVES)
+
+Add a simulation mode.
+
+Create a mock GPS route that moves the bus along the stops automatically every few seconds.
+
+This allows testing without the real GPS device.
+
+---
+
+8️⃣ MAP PERFORMANCE
+
+Optimize map rendering:
+
+* Avoid full map refresh
+* Only update marker positions
+* Ensure smooth animation
+
+---
+
+Use **Node.js + Express + Socket.io** backend and **Google Maps API or Leaflet** on frontend.
+
+Organize code clearly:
+
+/server
+/client
+/assets
+
+The system must be stable and smooth for a **final year engineering project demo**.
