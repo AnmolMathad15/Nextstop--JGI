@@ -302,5 +302,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Fleet alerts
+  app.get("/api/alerts", async (req, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const alerts = await storage.getFleetAlerts(status);
+      res.json(alerts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch alerts" });
+    }
+  });
+
+  app.patch("/api/alerts/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, adminNotes } = req.body;
+      if (!status) return res.status(400).json({ error: "status is required" });
+      const updated = await storage.updateFleetAlertStatus(id, status, adminNotes);
+      if (!updated) return res.status(404).json({ error: "Alert not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update alert" });
+    }
+  });
+
   return httpServer;
 }

@@ -1,0 +1,2 @@
+- [GPS Fleet System Architecture](gps-fleet-system.md) — LocationService is source-agnostic; all GPS providers feed through validateLocation() before broadcast.
+- [WebSocket message types](ws-message-types.md) — Full list of WS message types including pause/resume/fleet alerts added in GPS feature build.

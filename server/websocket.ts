@@ -1,18 +1,16 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { storage } from "./storage";
-
-// Utility for speed and distance
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+import {
+  validateLocation,
+  checkGeofences,
+  checkOperationalGeofence,
+  calculateSpeed,
+  haversineKm,
+  type RawLocationInput,
+  type ProcessedLocation,
+  type LocationAlert,
+} from "./locationService";
 
 interface LocationUpdate {
   tripId: string;
@@ -35,37 +33,28 @@ interface ClientInfo {
 }
 
 const clients = new Map<WebSocket, ClientInfo>();
-const latestLocations = new Map<string, LocationUpdate>();
-const OVERSPEED_THRESHOLD = 60; // km/h
-const GEOFENCE_RADIUS = 0.3; // 300 meters in km
+const latestLocations = new Map<string, ProcessedLocation>();
+
+// Offline detection: track last update time per tripId
+const lastUpdateTime = new Map<string, number>();
+const offlineCheckIntervals = new Map<string, NodeJS.Timeout>();
+const OFFLINE_THRESHOLD_MS = 15_000;
 
 export function setupWebSocket(server: Server) {
-  // ... existing setup ...
   const wss = new WebSocketServer({ server, path: "/ws" });
 
   wss.on("connection", (ws: WebSocket) => {
-    console.log("WebSocket client connected");
-
     ws.on("message", async (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString());
-        
         switch (message.type) {
-          case "auth":
-            handleAuth(ws, message);
-            break;
-          case "subscribe":
-            handleSubscribe(ws, message);
-            break;
-          case "location:update":
-            await handleLocationUpdate(ws, message, wss);
-            break;
-          case "trip:start":
-            await handleTripStart(ws, message);
-            break;
-          case "trip:end":
-            await handleTripEnd(ws, message, wss);
-            break;
+          case "auth":           handleAuth(ws, message); break;
+          case "subscribe":      handleSubscribe(ws, message); break;
+          case "location:update": await handleLocationUpdate(ws, message, wss); break;
+          case "trip:start":     await handleTripStart(ws, message, wss); break;
+          case "trip:end":       await handleTripEnd(ws, message, wss); break;
+          case "trip:pause":     await handleTripPause(ws, message, wss); break;
+          case "trip:resume":    await handleTripResume(ws, message, wss); break;
         }
       } catch (error) {
         console.error("WebSocket message error:", error);
@@ -74,228 +63,234 @@ export function setupWebSocket(server: Server) {
     });
 
     ws.on("close", () => {
-      const clientInfo = clients.get(ws);
-      if (clientInfo?.tripId) {
-        latestLocations.delete(clientInfo.tripId);
+      const info = clients.get(ws);
+      if (info?.tripId) {
+        clearOfflineTimer(info.tripId);
+        latestLocations.delete(info.tripId);
+        lastUpdateTime.delete(info.tripId);
       }
       clients.delete(ws);
-      console.log("WebSocket client disconnected");
     });
 
-    ws.on("error", (error) => {
-      console.error("WebSocket error:", error);
-    });
+    ws.on("error", (err) => console.error("WebSocket error:", err));
   });
 
   console.log("WebSocket server initialized on /ws");
   return wss;
 }
 
+// ── Auth & Subscribe ────────────────────────────────────────────────────────
+
 function handleAuth(ws: WebSocket, message: { role: string; userId?: string; driverId?: string }) {
-  const clientInfo: ClientInfo = {
-    role: message.role as "driver" | "student" | "admin",
+  const info: ClientInfo = {
+    role: message.role as ClientInfo["role"],
     userId: message.userId,
     driverId: message.driverId,
   };
-  clients.set(ws, clientInfo);
-  ws.send(JSON.stringify({ type: "auth:success", role: clientInfo.role }));
+  clients.set(ws, info);
+  ws.send(JSON.stringify({ type: "auth:success", role: info.role }));
 }
 
 function handleSubscribe(ws: WebSocket, message: { routeId?: number }) {
-  const clientInfo = clients.get(ws);
-  if (clientInfo) {
-    clientInfo.routeId = message.routeId;
-    clients.set(ws, clientInfo);
-    
-    if (message.routeId) {
-      const routeLocations = Array.from(latestLocations.values())
-        .filter(loc => loc.routeId === message.routeId);
-      ws.send(JSON.stringify({ type: "locations:init", locations: routeLocations }));
-    } else {
-      ws.send(JSON.stringify({ type: "locations:init", locations: Array.from(latestLocations.values()) }));
-    }
-  }
+  const info = clients.get(ws);
+  if (!info) return;
+  info.routeId = message.routeId;
+  clients.set(ws, info);
+
+  const all = Array.from(latestLocations.values());
+  const filtered = message.routeId ? all.filter(l => l.routeId === message.routeId) : all;
+  ws.send(JSON.stringify({ type: "locations:init", locations: filtered }));
 }
 
-// Road snapping using OSRM
-async function snapToRoad(lat1: number, lng1: number, lat2: number, lng2: number): Promise<{ lat: number, lng: number }[]> {
-  try {
-    const baseUrl = process.env.OSRM_BASE_URL || "https://router.project-osrm.org";
-    const url = `${baseUrl}/match/v1/driving/${lng1},${lat1};${lng2},${lat2}?geometries=geojson&overview=full`;
-    const response = await fetch(url);
-    
-    // Check if response is JSON
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      const text = await response.text();
-      console.warn("OSRM returned non-JSON response:", text.substring(0, 100));
-      return [{ lat: lat2, lng: lng2 }];
-    }
-
-    const data = await response.json();
-    
-    if (data.code === 'Ok' && data.matchings && data.matchings.length > 0) {
-      const coords = data.matchings[0].geometry.coordinates;
-      return coords.map((c: any) => ({ lng: c[0], lat: c[1] }));
-    }
-  } catch (error) {
-    console.error("OSRM matching failed:", error);
-  }
-  return [{ lat: lat2, lng: lng2 }];
-}
+// ── Location Update ─────────────────────────────────────────────────────────
 
 async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss: WebSocketServer) {
-  const clientInfo = clients.get(ws);
-  if (clientInfo?.role !== "driver" || !clientInfo.tripId) {
+  const info = clients.get(ws);
+  if (info?.role !== "driver" || !info.tripId) {
     ws.send(JSON.stringify({ type: "error", message: "Not authorized to send location updates" }));
     return;
   }
 
-  const prevLocation = latestLocations.get(clientInfo.tripId);
-  const now = Date.now();
-  
-  // GPS Filtering
-  if (prevLocation) {
-    const timeDiff = (now - (prevLocation.timestamp || 0)) / 1000;
-    if (timeDiff < 3) return; // Ignore updates < 3s apart
+  const prev = latestLocations.get(info.tripId);
 
-    const distance = calculateDistance(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
-    if (distance > 0.3) return; // Ignore jumps > 300m
-  }
-
-  let finalLat = message.lat;
-  let finalLng = message.lng;
-  if (prevLocation) {
-    const snapped = await snapToRoad(prevLocation.lat, prevLocation.lng, message.lat, message.lng);
-    const lastPoint = snapped[snapped.length - 1];
-    finalLat = lastPoint.lat;
-    finalLng = lastPoint.lng;
-  }
-
-  let calculatedSpeed = message.speed || 0;
-  if (prevLocation && !message.speed) {
-    const distance = calculateDistance(prevLocation.lat, prevLocation.lng, finalLat, finalLng);
-    const timeDiff = (now - (prevLocation.timestamp || now)) / 1000 / 3600;
-    if (timeDiff > 0) {
-      calculatedSpeed = distance / timeDiff;
-    }
-  }
-
-  const locationData: LocationUpdate = {
-    tripId: clientInfo.tripId,
+  const raw: RawLocationInput = {
+    tripId: info.tripId,
     routeId: message.routeId,
     busId: message.busId,
-    lat: finalLat,
-    lng: finalLng,
-    speed: calculatedSpeed,
+    driverId: info.driverId || "",
+    lat: message.lat,
+    lng: message.lng,
+    speed: message.speed,
     heading: message.heading,
     accuracy: message.accuracy,
-    timestamp: now,
+    timestamp: Date.now(),
+    provider: "mobile_gps",
   };
 
-  latestLocations.set(clientInfo.tripId, locationData);
-  processAnalytics(clientInfo, locationData, prevLocation).catch(console.error);
-
-  try {
-    await storage.appendLiveLocation({
-      tripId: clientInfo.tripId,
-      lat: finalLat,
-      lng: finalLng,
-      speed: calculatedSpeed,
-      heading: message.heading,
-      accuracy: message.accuracy,
-    });
-  } catch (error) {
-    console.error("Failed to persist location:", error);
+  const validated = validateLocation(raw, prev);
+  if (!validated.isValid) {
+    // Silently drop invalid points — don't penalise the driver
+    return;
   }
 
-  wss.clients.forEach((client) => {
+  const speed = calculateSpeed(prev, { lat: raw.lat, lng: raw.lng, timestamp: raw.timestamp!, speed: raw.speed });
+
+  const processed: ProcessedLocation = {
+    tripId: info.tripId,
+    routeId: message.routeId,
+    busId: message.busId,
+    driverId: info.driverId || "",
+    lat: validated.lat,
+    lng: validated.lng,
+    speed,
+    heading: message.heading,
+    accuracy: message.accuracy,
+    timestamp: validated.timestamp,
+    provider: "mobile_gps",
+  };
+
+  latestLocations.set(info.tripId, processed);
+  lastUpdateTime.set(info.tripId, Date.now());
+  scheduleOfflineCheck(info.tripId, wss, message.routeId);
+
+  // Persist to DB (fire-and-forget, don't block broadcast)
+  storage.appendLiveLocation({
+    tripId: info.tripId,
+    lat: processed.lat,
+    lng: processed.lng,
+    speed: processed.speed,
+    heading: processed.heading,
+    accuracy: processed.accuracy,
+  }).catch(console.error);
+
+  // Broadcast bus:update to relevant subscribers
+  const broadcastPayload = JSON.stringify({ type: "bus:update", location: processed });
+  wss.clients.forEach(client => {
     if (client !== ws && client.readyState === WebSocket.OPEN) {
-      const info = clients.get(client);
-      if (info && (info.role === "admin" || info.routeId === message.routeId)) {
-        client.send(JSON.stringify({ type: "bus:update", location: locationData }));
+      const ci = clients.get(client);
+      if (ci && (ci.role === "admin" || ci.routeId === message.routeId)) {
+        client.send(broadcastPayload);
       }
     }
   });
 
   ws.send(JSON.stringify({ type: "location:ack" }));
+
+  // Analytics (non-blocking)
+  runAnalytics(info, processed, prev, wss).catch(console.error);
 }
 
-async function processAnalytics(clientInfo: ClientInfo, current: LocationUpdate, prev?: LocationUpdate) {
-  if (!clientInfo.driverId) return;
+// ── Analytics: geofencing + rash driving + operational area ────────────────
 
-  const driverId = clientInfo.driverId;
-  const stats = await storage.getDriverStats(driverId) || {
-    driverId,
-    totalDistance: 0,
-    avgSpeed: 0,
-    overspeedCount: 0,
-    performanceScore: 100,
+async function runAnalytics(
+  info: ClientInfo,
+  current: ProcessedLocation,
+  prev: ProcessedLocation | undefined,
+  wss: WebSocketServer,
+) {
+  if (!info.driverId) return;
+
+  // 1. Driver stats
+  const stats = await storage.getDriverStats(info.driverId) || {
+    driverId: info.driverId, totalDistance: 0, avgSpeed: 0, overspeedCount: 0, performanceScore: 100,
   };
-
-  // 1. Distance update
   if (prev) {
-    const dist = calculateDistance(prev.lat, prev.lng, current.lat, current.lng);
-    stats.totalDistance = (stats.totalDistance || 0) + dist;
+    stats.totalDistance = (stats.totalDistance || 0) + haversineKm(prev.lat, prev.lng, current.lat, current.lng);
   }
-
-  // 2. Overspeed detection
-  let overspeedDetected = false;
-  if (current.speed && current.speed > OVERSPEED_THRESHOLD) {
-    stats.overspeedCount = (stats.overspeedCount || 0) + 1;
-    overspeedDetected = true;
-  }
-
-  // 3. Performance Score
+  const route = await storage.getRoute(current.routeId);
+  const speedLimit = route?.speedLimit ?? 40;
+  if (current.speed > speedLimit) stats.overspeedCount = (stats.overspeedCount || 0) + 1;
   stats.performanceScore = Math.max(0, 100 - (stats.overspeedCount || 0) * 5);
-  
-  // Throttle DB updates: only update if overspeed or distance changed significantly (e.g., > 100m)
-  if (overspeedDetected || (stats.totalDistance || 0) % 0.1 < 0.01) {
-    await storage.updateDriverStats(driverId, stats);
+  storage.updateDriverStats(info.driverId, stats).catch(console.error);
+
+  const alerts: LocationAlert[] = [];
+
+  // 2. Stop geofencing (100m radius + 5s dwell)
+  if (route) {
+    const geoAlerts = await checkGeofences(current, route);
+    alerts.push(...geoAlerts);
   }
 
-  // 4. Geo-fencing
-  const stops = await storage.getRouteStops(current.routeId);
-  for (const stop of stops) {
-    const distToStop = calculateDistance(current.lat, current.lng, stop.lat, stop.lng);
-    const lastEvent = await storage.getLatestGeoEvent(current.tripId, stop.id);
+  // 3. Operational geofence
+  const areaAlert = checkOperationalGeofence(current);
+  if (areaAlert) alerts.push(areaAlert);
 
-    if (distToStop <= GEOFENCE_RADIUS) {
-      // ENTER
-      if (!lastEvent || lastEvent.type === "EXIT") {
-        await storage.logGeoEvent({ tripId: current.tripId, stopId: stop.id, type: "ENTER" });
-      }
-    } else {
-      // EXIT
-      if (lastEvent && lastEvent.type === "ENTER") {
-        await storage.logGeoEvent({ tripId: current.tripId, stopId: stop.id, type: "EXIT" });
-      }
+  // 4. Persist + broadcast any alerts
+  for (const alert of alerts) {
+    try {
+      const saved = await storage.createFleetAlert({
+        tripId: alert.tripId,
+        busId: alert.busId,
+        driverId: alert.driverId,
+        alertType: alert.alertType,
+        severity: alert.severity,
+        lat: alert.lat,
+        lng: alert.lng,
+        details: JSON.stringify(alert.details),
+      });
+
+      const alertPayload = JSON.stringify({
+        type: "fleet:alert",
+        alert: { ...saved, details: alert.details },
+      });
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          const ci = clients.get(client);
+          if (ci?.role === "admin") client.send(alertPayload);
+        }
+      });
+    } catch (err) {
+      console.error("Failed to save fleet alert:", err);
     }
   }
 }
 
-async function handleTripStart(ws: WebSocket, message: { driverId: string; busId: string; routeId: number }) {
-  const clientInfo = clients.get(ws);
-  if (clientInfo?.role !== "driver") {
+// ── Offline Detection ────────────────────────────────────────────────────────
+
+function scheduleOfflineCheck(tripId: string, wss: WebSocketServer, routeId: number) {
+  clearOfflineTimer(tripId);
+  const timer = setTimeout(() => {
+    const last = lastUpdateTime.get(tripId);
+    if (!last || Date.now() - last >= OFFLINE_THRESHOLD_MS) {
+      // Broadcast driver offline to subscribers
+      const payload = JSON.stringify({ type: "bus:paused", tripId, routeId });
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          const ci = clients.get(client);
+          if (ci && (ci.role === "admin" || ci.routeId === routeId)) {
+            client.send(payload);
+          }
+        }
+      });
+    }
+  }, OFFLINE_THRESHOLD_MS);
+  offlineCheckIntervals.set(tripId, timer);
+}
+
+function clearOfflineTimer(tripId: string) {
+  const existing = offlineCheckIntervals.get(tripId);
+  if (existing) { clearTimeout(existing); offlineCheckIntervals.delete(tripId); }
+}
+
+// ── Trip Start ───────────────────────────────────────────────────────────────
+
+async function handleTripStart(ws: WebSocket, message: { driverId: string; busId: string; routeId: number }, wss: WebSocketServer) {
+  const info = clients.get(ws);
+  if (info?.role !== "driver") {
     ws.send(JSON.stringify({ type: "error", message: "Not authorized" }));
     return;
   }
-
   try {
-    const existingTrip = await storage.getActiveTripByDriver(message.driverId);
-    if (existingTrip) {
-      await storage.endTrip(existingTrip.id);
-    }
+    const existing = await storage.getActiveTripByDriver(message.driverId);
+    if (existing) await storage.endTrip(existing.id);
 
     const trip = await storage.createTrip({
       driverId: message.driverId,
       busId: message.busId,
       routeId: message.routeId,
     });
-
-    clientInfo.tripId = trip.id;
-    clients.set(ws, clientInfo);
-
+    info.tripId = trip.id;
+    clients.set(ws, info);
     ws.send(JSON.stringify({ type: "trip:started", tripId: trip.id }));
   } catch (error) {
     console.error("Failed to start trip:", error);
@@ -303,26 +298,33 @@ async function handleTripStart(ws: WebSocket, message: { driverId: string; busId
   }
 }
 
+// ── Trip End ────────────────────────────────────────────────────────────────
+
 async function handleTripEnd(ws: WebSocket, message: { tripId: string }, wss: WebSocketServer) {
-  const clientInfo = clients.get(ws);
-  if (clientInfo?.role !== "driver" || clientInfo.tripId !== message.tripId) {
+  const info = clients.get(ws);
+  if (info?.role !== "driver" || info.tripId !== message.tripId) {
     ws.send(JSON.stringify({ type: "error", message: "Not authorized" }));
     return;
   }
-
   try {
     const trip = await storage.endTrip(message.tripId);
     if (trip) {
-      const locationData = latestLocations.get(message.tripId);
+      clearOfflineTimer(message.tripId);
       latestLocations.delete(message.tripId);
-      clientInfo.tripId = undefined;
-      clients.set(ws, clientInfo);
+      lastUpdateTime.delete(message.tripId);
+      info.tripId = undefined;
+      clients.set(ws, info);
 
-      wss.clients.forEach((client) => {
+      const offlinePayload = JSON.stringify({
+        type: "bus:offline",
+        tripId: message.tripId,
+        routeId: trip.routeId,
+      });
+      wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
-          const info = clients.get(client);
-          if (info && (info.role === "admin" || info.routeId === trip.routeId)) {
-            client.send(JSON.stringify({ type: "bus:offline", tripId: message.tripId, routeId: trip.routeId }));
+          const ci = clients.get(client);
+          if (ci && (ci.role === "admin" || ci.routeId === trip.routeId)) {
+            client.send(offlinePayload);
           }
         }
       });
@@ -335,6 +337,71 @@ async function handleTripEnd(ws: WebSocket, message: { tripId: string }, wss: We
   }
 }
 
-export function getActiveLocations(): LocationUpdate[] {
+// ── Trip Pause ──────────────────────────────────────────────────────────────
+
+async function handleTripPause(ws: WebSocket, message: { tripId: string }, wss: WebSocketServer) {
+  const info = clients.get(ws);
+  if (info?.role !== "driver" || info.tripId !== message.tripId) {
+    ws.send(JSON.stringify({ type: "error", message: "Not authorized" }));
+    return;
+  }
+  try {
+    await storage.pauseTrip(message.tripId);
+    clearOfflineTimer(message.tripId);
+    ws.send(JSON.stringify({ type: "trip:paused", tripId: message.tripId }));
+
+    const loc = latestLocations.get(message.tripId);
+    const pausedPayload = JSON.stringify({
+      type: "bus:paused",
+      tripId: message.tripId,
+      routeId: loc?.routeId,
+    });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        const ci = clients.get(client);
+        if (ci && (ci.role === "admin" || ci.routeId === loc?.routeId)) {
+          client.send(pausedPayload);
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Failed to pause trip:", error);
+    ws.send(JSON.stringify({ type: "error", message: "Failed to pause trip" }));
+  }
+}
+
+// ── Trip Resume ─────────────────────────────────────────────────────────────
+
+async function handleTripResume(ws: WebSocket, message: { tripId: string }, wss: WebSocketServer) {
+  const info = clients.get(ws);
+  if (info?.role !== "driver" || info.tripId !== message.tripId) {
+    ws.send(JSON.stringify({ type: "error", message: "Not authorized" }));
+    return;
+  }
+  try {
+    await storage.resumeTrip(message.tripId);
+    ws.send(JSON.stringify({ type: "trip:resumed", tripId: message.tripId }));
+
+    const loc = latestLocations.get(message.tripId);
+    const resumePayload = JSON.stringify({
+      type: "bus:resumed",
+      tripId: message.tripId,
+      routeId: loc?.routeId,
+    });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        const ci = clients.get(client);
+        if (ci && (ci.role === "admin" || ci.routeId === loc?.routeId)) {
+          client.send(resumePayload);
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Failed to resume trip:", error);
+    ws.send(JSON.stringify({ type: "error", message: "Failed to resume trip" }));
+  }
+}
+
+export function getActiveLocations(): ProcessedLocation[] {
   return Array.from(latestLocations.values());
 }

@@ -1,0 +1,298 @@
+IMPORTANT: DO NOT rebuild or redesign my project.
+
+I already have a fully developed NextStop JGI project with authentication, dashboards, routes, maps, backend APIs, database, and UI.
+
+Your task is ONLY to integrate a production-quality Driver Mobile GPS Tracking System into the existing codebase without changing any existing functionality, UI, routing, authentication, database structure (unless necessary), or project architecture.
+
+This must be treated as a feature addition, not a new project.
+
+-------------------------------------------------------
+OBJECTIVE
+-------------------------------------------------------
+
+Add live GPS tracking using the driver's mobile device similar to Uber, Ola, Zepto, Swiggy, Blinkit, etc.
+
+This module should become one of the Location Providers for the system and should integrate seamlessly with the existing project.
+
+Do not remove or replace existing features.
+
+-------------------------------------------------------
+DRIVER DASHBOARD
+-------------------------------------------------------
+
+Inside the existing Driver Dashboard:
+
+Add:
+
+• Start Trip
+• Pause Trip
+• Resume Trip
+• End Trip
+
+When Start Trip is clicked:
+
+Request browser location permission.
+
+Use:
+
+navigator.geolocation.watchPosition()
+
+NOT getCurrentPosition().
+
+GPS Configuration:
+
+enableHighAccuracy: true
+
+maximumAge: 0
+
+timeout: 10000
+
+-------------------------------------------------------
+LOCATION UPDATES
+-------------------------------------------------------
+
+Continuously track driver location.
+
+Send updates every 2–3 seconds OR whenever the bus has moved more than 10 meters.
+
+Do not send duplicate coordinates.
+
+Include:
+
+driverId
+
+busId
+
+tripId
+
+latitude
+
+longitude
+
+speed
+
+heading
+
+accuracy
+
+timestamp
+
+Reject GPS points where:
+
+Accuracy >20 meters
+
+Invalid coordinates
+
+Impossible jumps
+
+-------------------------------------------------------
+BACKEND INTEGRATION
+-------------------------------------------------------
+
+Do NOT replace my backend.
+
+Integrate into my existing backend.
+
+Create a reusable Location Service.
+
+Responsibilities:
+
+Receive GPS updates
+
+Validate
+
+Store latest location
+
+Store trip history
+
+Broadcast via existing WebSocket/Socket.IO implementation
+
+Maintain online/offline state
+
+Do not break any existing APIs.
+
+-------------------------------------------------------
+DATABASE
+-------------------------------------------------------
+
+Reuse existing tables whenever possible.
+
+Only add new tables or columns if absolutely necessary.
+
+Maintain compatibility with existing project.
+
+-------------------------------------------------------
+LIVE MAP
+-------------------------------------------------------
+
+Use the existing map already present in my project.
+
+Do NOT replace MapLibre or existing map implementation.
+
+Only update the existing bus marker.
+
+Animate movement smoothly.
+
+Rotate marker according to heading.
+
+No marker jumping.
+
+-------------------------------------------------------
+GEOFENCING
+-------------------------------------------------------
+
+Integrate geofencing into the existing route system.
+
+Every bus stop should contain:
+
+latitude
+
+longitude
+
+radius
+
+Default radius:
+
+100 meters
+
+A stop should only be marked as reached when:
+
+Bus enters the geofence
+
+AND
+
+Bus remains inside for at least 5 seconds
+
+AND
+
+Bus is moving towards that stop according to the assigned route.
+
+Prevent duplicate notifications caused by GPS drift.
+
+-------------------------------------------------------
+ETA
+-------------------------------------------------------
+
+Use the existing route information.
+
+Calculate ETA using:
+
+Route distance
+
+Current speed
+
+Historical average speed
+
+Never calculate ETA using straight-line distance.
+
+-------------------------------------------------------
+STUDENT DASHBOARD
+-------------------------------------------------------
+
+Without changing the UI layout,
+
+update the existing tracking page to display:
+
+Live Bus Position
+
+Smooth movement
+
+Current Speed
+
+Driver Online Status
+
+Last Updated
+
+Previous Stop
+
+Next Stop
+
+ETA
+
+Distance Remaining
+
+GPS Status
+
+-------------------------------------------------------
+NOTIFICATIONS
+-------------------------------------------------------
+
+Integrate with the existing notification system.
+
+Allow students to receive alerts when the bus is:
+
+100m away
+
+250m away
+
+500m away
+
+1km away
+
+-------------------------------------------------------
+OFFLINE DETECTION
+-------------------------------------------------------
+
+If no GPS updates arrive for 15 seconds:
+
+Show Driver Offline
+
+Display Last Known Location
+
+Display Last Updated Time
+
+Automatically reconnect when GPS returns.
+
+-------------------------------------------------------
+BATTERY OPTIMIZATION
+-------------------------------------------------------
+
+Reduce GPS updates when stationary.
+
+Increase update frequency while moving.
+
+-------------------------------------------------------
+SECURITY
+-------------------------------------------------------
+
+Reuse the existing authentication.
+
+Every GPS update must be authenticated.
+
+Only the assigned driver can update the assigned bus location.
+
+Reject unauthorized updates.
+
+-------------------------------------------------------
+FUTURE COMPATIBILITY
+-------------------------------------------------------
+
+Do NOT hardcode this feature.
+
+Create a modular Location Provider architecture.
+
+Current Provider:
+
+Driver Mobile GPS
+
+Future Providers:
+
+Transight Discovery 4G GPS
+
+ESP32 GPS
+
+Admin Manual Update
+
+The frontend should never care which provider supplies the location.
+
+-------------------------------------------------------
+IMPORTANT
+-------------------------------------------------------
+
+Do NOT modify unrelated files.
+
+Do NOT redesign existing UI.
+
+Do NOT replace existing components.
+
+Only integrate this feature into the current project while preserving all existing functionality.

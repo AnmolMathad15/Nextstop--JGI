@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
-interface LocationUpdate {
+export interface LocationUpdate {
   tripId: string;
   routeId: number;
   busId: string;
@@ -9,24 +9,60 @@ interface LocationUpdate {
   speed?: number;
   heading?: number;
   accuracy?: number;
+  timestamp?: number;
+  driverOnline?: boolean;
+}
+
+export interface FleetAlertPayload {
+  id: string;
+  alertType: string;
+  severity: string;
+  tripId?: string;
+  busId?: string;
+  driverId?: string;
+  lat?: number;
+  lng?: number;
+  details?: Record<string, unknown>;
+  timestamp: number;
 }
 
 interface UseWebSocketOptions {
   role: "driver" | "student" | "admin";
   userId?: string;
+  driverId?: string;
   routeId?: number;
   onLocationUpdate?: (location: LocationUpdate) => void;
   onBusOffline?: (tripId: string, routeId: number) => void;
+  onFleetAlert?: (alert: FleetAlertPayload) => void;
 }
 
 export function useWebSocket(options: UseWebSocketOptions) {
-  const { role, userId, routeId, onLocationUpdate, onBusOffline } = options;
+  const { role, userId, driverId, routeId, onLocationUpdate, onBusOffline, onFleetAlert } = options;
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
   const [locations, setLocations] = useState<LocationUpdate[]>([]);
+  const [fleetAlerts, setFleetAlerts] = useState<FleetAlertPayload[]>([]);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
   const isInitializedRef = useRef(false);
+
+  // Track offline status: tripId -> last update timestamp
+  const lastUpdateRef = useRef<Map<string, number>>(new Map());
+  const offlineTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  const markDriverOffline = useCallback((locTripId: string) => {
+    setLocations(prev =>
+      prev.map(l => l.tripId === locTripId ? { ...l, driverOnline: false } : l)
+    );
+  }, []);
+
+  const scheduleOfflineDetection = useCallback((locTripId: string) => {
+    const existing = offlineTimersRef.current.get(locTripId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => markDriverOffline(locTripId), 15_000);
+    offlineTimersRef.current.set(locTripId, timer);
+  }, [markDriverOffline]);
 
   useEffect(() => {
     if (isInitializedRef.current) return;
@@ -40,54 +76,78 @@ export function useWebSocket(options: UseWebSocketOptions) {
         const host = window.location.hostname || "localhost";
         const port = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
         const wsUrl = `${proto}//${host}${port && port !== "80" && port !== "443" ? `:${port}` : ""}/ws`;
-        
-        console.log("Connecting to WebSocket:", wsUrl);
+
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log("WebSocket connected");
           setIsConnected(true);
-          ws.send(JSON.stringify({ type: "auth", role, userId }));
-          
+          ws.send(JSON.stringify({ type: "auth", role, userId, driverId }));
           if (role !== "driver" && routeId) {
             ws.send(JSON.stringify({ type: "subscribe", routeId }));
+          }
+          if (role === "admin") {
+            ws.send(JSON.stringify({ type: "subscribe" })); // subscribe to all
           }
         };
 
         ws.onmessage = (event) => {
           try {
             const message = JSON.parse(event.data);
-            
             switch (message.type) {
               case "auth:success":
-                console.log("WebSocket authenticated as", message.role);
                 break;
               case "locations:init":
-                setLocations(message.locations || []);
+                setLocations((message.locations || []).map((l: LocationUpdate) => ({
+                  ...l, driverOnline: true,
+                })));
                 break;
-              case "bus:update":
+              case "bus:update": {
+                const loc: LocationUpdate = { ...message.location, driverOnline: true };
                 setLocations(prev => {
-                  const index = prev.findIndex(l => l.tripId === message.location.tripId);
-                  if (index >= 0) {
+                  const idx = prev.findIndex(l => l.tripId === loc.tripId);
+                  if (idx >= 0) {
                     const updated = [...prev];
-                    updated[index] = message.location;
+                    updated[idx] = loc;
                     return updated;
                   }
-                  return [...prev, message.location];
+                  return [...prev, loc];
                 });
-                onLocationUpdate?.(message.location);
+                scheduleOfflineDetection(loc.tripId);
+                onLocationUpdate?.(loc);
                 break;
+              }
               case "bus:offline":
                 setLocations(prev => prev.filter(l => l.tripId !== message.tripId));
+                offlineTimersRef.current.get(message.tripId) && clearTimeout(offlineTimersRef.current.get(message.tripId)!);
+                offlineTimersRef.current.delete(message.tripId);
                 onBusOffline?.(message.tripId, message.routeId);
+                break;
+              case "bus:paused":
+                setLocations(prev =>
+                  prev.map(l => l.tripId === message.tripId ? { ...l, driverOnline: false } : l)
+                );
                 break;
               case "trip:started":
                 setTripId(message.tripId);
+                setIsPaused(false);
                 break;
               case "trip:ended":
                 setTripId(null);
+                setIsPaused(false);
                 break;
+              case "trip:paused":
+                setIsPaused(true);
+                break;
+              case "trip:resumed":
+                setIsPaused(false);
+                break;
+              case "fleet:alert": {
+                const alert: FleetAlertPayload = message.alert;
+                setFleetAlerts(prev => [alert, ...prev]);
+                onFleetAlert?.(alert);
+                break;
+              }
               case "location:ack":
                 break;
               case "error":
@@ -100,16 +160,12 @@ export function useWebSocket(options: UseWebSocketOptions) {
         };
 
         ws.onclose = () => {
-          console.log("WebSocket disconnected");
           setIsConnected(false);
           reconnectTimeoutRef.current = setTimeout(connect, 3000);
         };
 
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
-        };
-      } catch (error) {
-        console.error("Failed to create WebSocket:", error);
+        ws.onerror = () => {};
+      } catch {
         reconnectTimeoutRef.current = setTimeout(connect, 3000);
       }
     };
@@ -118,57 +174,58 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
     return () => {
       isInitializedRef.current = false;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      offlineTimersRef.current.forEach(t => clearTimeout(t));
+      offlineTimersRef.current.clear();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [role, userId, routeId, onLocationUpdate, onBusOffline]);
+  }, [role, userId, driverId, routeId, onLocationUpdate, onBusOffline, onFleetAlert, scheduleOfflineDetection]);
 
-  const startTrip = (driverId: string, busId: string, routeId: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "trip:start",
-        driverId,
-        busId,
-        routeId,
-      }));
-    }
-  };
+  const startTrip = useCallback((dId: string, busId: string, rId: number) => {
+    wsRef.current?.readyState === WebSocket.OPEN &&
+      wsRef.current.send(JSON.stringify({ type: "trip:start", driverId: dId, busId, routeId: rId }));
+  }, []);
 
-  const endTrip = (tripId: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "trip:end",
-        tripId,
-      }));
-    }
-  };
+  const endTrip = useCallback((tId: string) => {
+    wsRef.current?.readyState === WebSocket.OPEN &&
+      wsRef.current.send(JSON.stringify({ type: "trip:end", tripId: tId }));
+  }, []);
 
-  const sendLocation = (routeId: number, busId: string, lat: number, lng: number, speed?: number, heading?: number, accuracy?: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && tripId) {
+  const pauseTrip = useCallback((tId: string) => {
+    wsRef.current?.readyState === WebSocket.OPEN &&
+      wsRef.current.send(JSON.stringify({ type: "trip:pause", tripId: tId }));
+  }, []);
+
+  const resumeTrip = useCallback((tId: string) => {
+    wsRef.current?.readyState === WebSocket.OPEN &&
+      wsRef.current.send(JSON.stringify({ type: "trip:resume", tripId: tId }));
+  }, []);
+
+  const sendLocation = useCallback((
+    rId: number, busId: string, lat: number, lng: number,
+    speed?: number, heading?: number, accuracy?: number
+  ) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && tripId && !isPaused) {
       wsRef.current.send(JSON.stringify({
         type: "location:update",
-        routeId,
-        busId,
-        lat,
-        lng,
-        speed,
-        heading,
-        accuracy,
+        routeId: rId, busId, lat, lng, speed, heading, accuracy,
       }));
     }
-  };
+  }, [tripId, isPaused]);
 
   return {
     isConnected,
     tripId,
+    isPaused,
     locations,
+    fleetAlerts,
     startTrip,
     endTrip,
+    pauseTrip,
+    resumeTrip,
     sendLocation,
   };
 }

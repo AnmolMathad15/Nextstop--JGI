@@ -1,0 +1,221 @@
+-------------------------------------------------------
+ADVANCED FLEET MONITORING
+-------------------------------------------------------
+
+Implement the following features into the existing project without modifying existing functionality.
+
+==========================================
+1. HUBLI–DHARWAD OPERATIONAL GEOFENCE
+==========================================
+
+Create an Operational Geofence for the entire Hubli–Dharwad service area.
+
+Do NOT use a simple circular geofence.
+
+Use a polygon geofence that covers only the approved operational region and bus routes.
+
+Every GPS update must be checked against this operational boundary.
+
+If the bus leaves the allowed operational area:
+
+• Wait 30 seconds before triggering (to avoid GPS glitches).
+• Verify using at least 3 consecutive GPS updates.
+• If still outside, generate an alert.
+
+Alert details:
+
+Alert Type:
+Bus Out Of Operational Area
+
+Include:
+
+Bus Number
+
+Driver Name
+
+Current Latitude
+
+Current Longitude
+
+Time
+
+Distance outside allowed boundary
+
+Nearest Route
+
+Show the alert immediately on the Admin Dashboard.
+
+Store it in the Alerts database.
+
+Allow Admin to acknowledge or dismiss the alert.
+
+---------------------------------------
+
+2. RASH DRIVING DETECTION
+---------------------------------------
+
+Continuously monitor driving behaviour.
+
+Track:
+
+• Current Speed
+• Average Speed
+• Sudden Acceleration
+• Sudden Braking
+• Sharp Cornering
+• Overspeed Duration
+
+Do NOT trigger alerts based on a single GPS reading.
+
+Only classify as rash driving when:
+
+Vehicle speed exceeds the configured route speed limit continuously.
+
+AND
+
+Harsh acceleration/braking events are detected.
+
+---------------------------------------
+
+3. CONTINUOUS SPEED VIOLATION
+---------------------------------------
+
+Each route should have a configurable speed limit.
+
+Example:
+
+Hubli City
+
+40 km/h
+
+Highway
+
+70 km/h
+
+College Campus
+
+20 km/h
+
+If the driver exceeds the speed limit,
+
+begin monitoring.
+
+Do NOT alert immediately.
+
+Instead,
+
+check whether the driver continues overspeeding across
+
+THREE CONSECUTIVE BUS STOPS.
+
+If overspeeding continues without returning below the speed limit before reaching three stops,
+
+generate a High Priority alert.
+
+Alert:
+
+Driver Driving Rashly
+
+Include:
+
+Driver Name
+
+Bus Number
+
+Current Speed
+
+Configured Speed Limit
+
+Maximum Recorded Speed
+
+Stops Crossed While Overspeeding
+
+Trip ID
+
+Current Location
+
+Timestamp
+
+---------------------------------------
+
+4. ADMIN ALERT CENTER
+---------------------------------------
+
+Create a Fleet Alert Center inside the existing Admin Dashboard.
+
+Display alerts in real time.
+
+Priority Levels:
+
+🟢 Low
+
+🟡 Medium
+
+🔴 High
+
+Critical alerts:
+
+• Bus Left Operational Area
+• Continuous Rash Driving
+• GPS Offline
+• Driver Offline
+• Panic Button (Future)
+• Tracker Disconnected (Future)
+
+Allow:
+
+Mark as Resolved
+
+Add Notes
+
+View Alert History
+
+---------------------------------------
+
+5. EVENT LOGGING
+---------------------------------------
+
+Store every safety event.
+
+Each log should contain:
+
+Alert ID
+
+Trip ID
+
+Bus ID
+
+Driver ID
+
+Latitude
+
+Longitude
+
+Timestamp
+
+Severity
+
+Status
+
+Admin Action
+
+---------------------------------------
+
+6. FUTURE COMPATIBILITY
+---------------------------------------
+
+The monitoring engine must work regardless of location source.
+
+It should support:
+
+Driver Mobile GPS
+
+Transight Discovery 4G GPS
+
+ESP32 GPS
+
+Future GPS providers
+
+No monitoring logic should depend on the GPS source.
+
+Only consume validated location updates from the central Location Service.

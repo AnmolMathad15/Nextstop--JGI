@@ -2,47 +2,50 @@ import { eq, desc, and, sql as drizzleSql } from "drizzle-orm";
 import { db } from "./db";
 import {
   users, routes, routeStops, buses, drivers, students, trips, liveLocations,
-  geoEvents, driverStats,
+  geoEvents, driverStats, fleetAlerts,
   type User, type InsertUser, type Route, type InsertRoute,
   type RouteStop, type InsertRouteStop, type Bus, type InsertBus,
   type Driver, type InsertDriver, type Student, type InsertStudent,
   type Trip, type InsertTrip, type LiveLocation, type InsertLiveLocation,
   type GeoEvent, type InsertGeoEvent, type DriverStats, type InsertDriverStats,
+  type FleetAlert, type InsertFleetAlert,
 } from "@shared/schema";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  
+
   getRoutes(): Promise<Route[]>;
   getRoute(id: number): Promise<Route | undefined>;
   createRoute(route: InsertRoute): Promise<Route>;
   getRouteStops(routeId: number): Promise<RouteStop[]>;
   createRouteStop(stop: InsertRouteStop): Promise<RouteStop>;
-  
+
   getBuses(): Promise<Bus[]>;
   getBus(id: string): Promise<Bus | undefined>;
   createBus(bus: InsertBus): Promise<Bus>;
   updateBus(id: string, data: Partial<InsertBus>): Promise<Bus | undefined>;
   deleteBus(id: string): Promise<void>;
-  
+
   getDrivers(): Promise<(Driver & { user: User | null })[]>;
   getDriver(id: string): Promise<Driver | undefined>;
   getDriverByUserId(userId: string): Promise<Driver | undefined>;
   createDriver(driver: InsertDriver): Promise<Driver>;
-  
+
   getStudents(): Promise<(Student & { user: User | null })[]>;
   getStudent(id: string): Promise<Student | undefined>;
   getStudentByUserId(userId: string): Promise<Student | undefined>;
   createStudent(student: InsertStudent): Promise<Student>;
-  
+
   getActiveTrips(): Promise<Trip[]>;
   getTrip(id: string): Promise<Trip | undefined>;
   getActiveTripByDriver(driverId: string): Promise<Trip | undefined>;
   createTrip(trip: InsertTrip): Promise<Trip>;
   endTrip(tripId: string): Promise<Trip | undefined>;
-  
+  pauseTrip(tripId: string): Promise<Trip | undefined>;
+  resumeTrip(tripId: string): Promise<Trip | undefined>;
+
   appendLiveLocation(location: InsertLiveLocation): Promise<LiveLocation>;
   getLatestLocationForTrip(tripId: string): Promise<LiveLocation | undefined>;
   getLatestLocationsForRoute(routeId: number): Promise<LiveLocation[]>;
@@ -52,48 +55,14 @@ export interface IStorage {
   getLatestGeoEvent(tripId: string, stopId: number): Promise<GeoEvent | undefined>;
   updateDriverStats(driverId: string, stats: Partial<InsertDriverStats>): Promise<DriverStats>;
   getDriverStats(driverId: string): Promise<DriverStats | undefined>;
+
+  // Fleet alerts
+  createFleetAlert(alert: InsertFleetAlert): Promise<FleetAlert>;
+  getFleetAlerts(status?: string): Promise<FleetAlert[]>;
+  updateFleetAlertStatus(id: string, status: string, adminNotes?: string): Promise<FleetAlert | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
-  // ... existing methods (keeping for context)
-
-  async logGeoEvent(event: InsertGeoEvent): Promise<GeoEvent> {
-    const [created] = await db.insert(geoEvents).values(event).returning();
-    return created;
-  }
-
-  async getLatestGeoEvent(tripId: string, stopId: number): Promise<GeoEvent | undefined> {
-    const [event] = await db.select().from(geoEvents)
-      .where(and(eq(geoEvents.tripId, tripId), eq(geoEvents.stopId, stopId)))
-      .orderBy(desc(geoEvents.timestamp))
-      .limit(1);
-    return event;
-  }
-
-  async updateDriverStats(driverId: string, stats: Partial<InsertDriverStats>): Promise<DriverStats> {
-    const [existing] = await db.select().from(driverStats).where(eq(driverStats.driverId, driverId));
-    if (existing) {
-      const [updated] = await db.update(driverStats)
-        .set({ ...stats, lastUpdate: new Date() })
-        .where(eq(driverStats.driverId, driverId))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db.insert(driverStats).values({ 
-        driverId, 
-        totalDistance: stats.totalDistance || 0,
-        avgSpeed: stats.avgSpeed || 0,
-        overspeedCount: stats.overspeedCount || 0,
-        performanceScore: stats.performanceScore || 100,
-      }).returning();
-      return created;
-    }
-  }
-
-  async getDriverStats(driverId: string): Promise<DriverStats | undefined> {
-    const [stats] = await db.select().from(driverStats).where(eq(driverStats.driverId, driverId));
-    return stats;
-  }
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
@@ -124,7 +93,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRouteStops(routeId: number): Promise<RouteStop[]> {
-    return db.select().from(routeStops).where(eq(routeStops.routeId, routeId)).orderBy(routeStops.sequence);
+    return db.select().from(routeStops)
+      .where(eq(routeStops.routeId, routeId))
+      .orderBy(routeStops.sequence);
   }
 
   async createRouteStop(stop: InsertRouteStop): Promise<RouteStop> {
@@ -205,8 +176,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActiveTripByDriver(driverId: string): Promise<Trip | undefined> {
-    const [trip] = await db.select().from(trips)
-      .where(and(eq(trips.driverId, driverId), eq(trips.status, "active")));
+    const [trip] = await db.select().from(trips).where(
+      and(eq(trips.driverId, driverId), eq(trips.status, "active"))
+    );
     return trip;
   }
 
@@ -223,6 +195,22 @@ export class DatabaseStorage implements IStorage {
     return ended;
   }
 
+  async pauseTrip(tripId: string): Promise<Trip | undefined> {
+    const [paused] = await db.update(trips)
+      .set({ status: "paused" })
+      .where(eq(trips.id, tripId))
+      .returning();
+    return paused;
+  }
+
+  async resumeTrip(tripId: string): Promise<Trip | undefined> {
+    const [resumed] = await db.update(trips)
+      .set({ status: "active" })
+      .where(eq(trips.id, tripId))
+      .returning();
+    return resumed;
+  }
+
   async appendLiveLocation(location: InsertLiveLocation): Promise<LiveLocation> {
     const [created] = await db.insert(liveLocations).values(location).returning();
     return created;
@@ -237,15 +225,76 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getLatestLocationsForRoute(routeId: number): Promise<LiveLocation[]> {
-    const activeTrips = await db.select().from(trips)
-      .where(and(eq(trips.routeId, routeId), eq(trips.status, "active")));
-    
+    const activeTrips = await db.select().from(trips).where(
+      and(eq(trips.routeId, routeId), eq(trips.status, "active"))
+    );
     const locations: LiveLocation[] = [];
     for (const trip of activeTrips) {
       const loc = await this.getLatestLocationForTrip(trip.id);
       if (loc) locations.push(loc);
     }
     return locations;
+  }
+
+  async logGeoEvent(event: InsertGeoEvent): Promise<GeoEvent> {
+    const [created] = await db.insert(geoEvents).values(event).returning();
+    return created;
+  }
+
+  async getLatestGeoEvent(tripId: string, stopId: number): Promise<GeoEvent | undefined> {
+    const [event] = await db.select().from(geoEvents)
+      .where(and(eq(geoEvents.tripId, tripId), eq(geoEvents.stopId, stopId)))
+      .orderBy(desc(geoEvents.timestamp))
+      .limit(1);
+    return event;
+  }
+
+  async updateDriverStats(driverId: string, stats: Partial<InsertDriverStats>): Promise<DriverStats> {
+    const [existing] = await db.select().from(driverStats).where(eq(driverStats.driverId, driverId));
+    if (existing) {
+      const [updated] = await db.update(driverStats)
+        .set({ ...stats, lastUpdate: new Date() })
+        .where(eq(driverStats.driverId, driverId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(driverStats).values({
+        driverId,
+        totalDistance: stats.totalDistance || 0,
+        avgSpeed: stats.avgSpeed || 0,
+        overspeedCount: stats.overspeedCount || 0,
+        performanceScore: stats.performanceScore || 100,
+      }).returning();
+      return created;
+    }
+  }
+
+  async getDriverStats(driverId: string): Promise<DriverStats | undefined> {
+    const [stats] = await db.select().from(driverStats).where(eq(driverStats.driverId, driverId));
+    return stats;
+  }
+
+  // Fleet alerts
+  async createFleetAlert(alert: InsertFleetAlert): Promise<FleetAlert> {
+    const [created] = await db.insert(fleetAlerts).values(alert).returning();
+    return created;
+  }
+
+  async getFleetAlerts(status?: string): Promise<FleetAlert[]> {
+    if (status) {
+      return db.select().from(fleetAlerts)
+        .where(eq(fleetAlerts.status, status))
+        .orderBy(desc(fleetAlerts.timestamp));
+    }
+    return db.select().from(fleetAlerts).orderBy(desc(fleetAlerts.timestamp));
+  }
+
+  async updateFleetAlertStatus(id: string, status: string, adminNotes?: string): Promise<FleetAlert | undefined> {
+    const [updated] = await db.update(fleetAlerts)
+      .set({ status, ...(adminNotes !== undefined ? { adminNotes } : {}) })
+      .where(eq(fleetAlerts.id, id))
+      .returning();
+    return updated;
   }
 }
 

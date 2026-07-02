@@ -1,7 +1,7 @@
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Search, Plus, Minus, Navigation } from "lucide-react";
+import { Search, Plus, Minus, Navigation, WifiOff, Signal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useQuery } from "@tanstack/react-query";
@@ -38,6 +38,7 @@ interface LocationUpdate {
   speed?: number;
   heading?: number;
   accuracy?: number;
+  driverOnline?: boolean;
 }
 
 interface BusMapProps {
@@ -48,28 +49,33 @@ interface BusMapProps {
 }
 
 export default function BusMap({ routeId, selectedStop, showAllBuses = false, role = "student" }: BusMapProps) {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const busMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const stopMarkersRef = useRef<maplibregl.Marker[]>([]);
-  const routeLineRef = useRef<string | null>(null);
-  const lastRouteUpdateRef = useRef<number>(0);
+  const mapContainerRef   = useRef<HTMLDivElement>(null);
+  const mapRef            = useRef<maplibregl.Map | null>(null);
+  const busMarkerRef      = useRef<maplibregl.Marker | null>(null);
+  const userMarkerRef     = useRef<maplibregl.Marker | null>(null);
+  const stopMarkersRef    = useRef<maplibregl.Marker[]>([]);
   const animationFrameRef = useRef<number | null>(null);
-  const prevCoordsRef = useRef<[number, number] | null>(null);
-  
+  const prevCoordsRef     = useRef<[number, number] | null>(null);
+  const lastUpdateRef     = useRef<number | null>(null);
+  const offlineTimerRef   = useRef<NodeJS.Timeout | null>(null);
+
   const [searchQuery, setSearchQuery] = useState("");
-  const [isMissed, setIsMissed] = useState(false);
-  const [eta, setEta] = useState<number | null>(null);
+  const [isMissed,    setIsMissed]    = useState(false);
+  const [eta,         setEta]         = useState<number | null>(null);
+  const [isOffline,   setIsOffline]   = useState(false);
+  const [liveSpeed,   setLiveSpeed]   = useState<number | null>(null);
 
   const { data: routeData } = useQuery<RouteWithStops>({
     queryKey: ["/api/routes", routeId],
     enabled: !!routeId,
   });
 
+  const handleBusOffline = useCallback(() => setIsOffline(true), []);
+
   const { isConnected, locations } = useWebSocket({
     role: role === "admin" ? "admin" : "student",
     routeId: showAllBuses ? undefined : routeId,
+    onBusOffline: handleBusOffline,
   });
 
   const selectedStopData = routeData?.stops.find((s) => s.name === selectedStop);
@@ -77,11 +83,11 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
   const calculateBearing = (start: [number, number], end: [number, number]) => {
     const startLat = start[1] * Math.PI / 180;
     const startLng = start[0] * Math.PI / 180;
-    const endLat = end[1] * Math.PI / 180;
-    const endLng = end[0] * Math.PI / 180;
+    const endLat   = end[1]   * Math.PI / 180;
+    const endLng   = end[0]   * Math.PI / 180;
     const y = Math.sin(endLng - startLng) * Math.cos(endLat);
     const x = Math.cos(startLat) * Math.sin(endLat) -
-          Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+              Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
   };
 
@@ -89,16 +95,12 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     const map = mapRef.current;
     if (!map || !map.loaded() || !routeData) return;
 
-    // Fixed route display logic
     const stops = [...routeData.stops].sort((a, b) => a.sequence - b.sequence);
     const coordinates = stops.map(s => [s.lng, s.lat]);
-    
+
     const geojson: GeoJSON.Feature = {
       type: 'Feature',
-      geometry: {
-        type: 'LineString',
-        coordinates: coordinates
-      },
+      geometry: { type: 'LineString', coordinates },
       properties: {}
     };
 
@@ -108,86 +110,74 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     } else {
       map.addSource('route', { type: 'geojson', data: geojson });
       map.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'route',
+        id: 'route-line', type: 'line', source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': '#14b8a6', 'line-width': 5, 'line-opacity': 0.8 }
       });
     }
 
-    // ETA calculation based on stop order
+    // ETA
     if (selectedStopData) {
-      const busIdx = findNearestStopIndex(busLocation, stops);
+      const busIdx    = findNearestStopIndex(busLocation, stops);
       const targetIdx = stops.findIndex(s => s.id === selectedStopData.id);
-
       if (busIdx > targetIdx) {
-        setEta(-1); // Passed
+        setEta(-1);
       } else {
         let totalDist = 0;
         for (let i = busIdx; i < targetIdx; i++) {
-          totalDist += calculateDistance(stops[i].lat, stops[i].lng, stops[i+1].lat, stops[i+1].lng);
+          totalDist += calculateDistance(stops[i].lat, stops[i].lng, stops[i + 1].lat, stops[i + 1].lng);
         }
-        const speed = busLocation.speed || 30; // fallback 30km/h
+        const speed = busLocation.speed || 30;
         setEta(Math.round((totalDist / speed) * 60));
       }
     }
   }, [routeData, selectedStopData]);
 
-  const findNearestStopIndex = (loc: {lat: number, lng: number}, stops: RouteStop[]) => {
-    let minD = Infinity;
-    let idx = 0;
+  const findNearestStopIndex = (loc: { lat: number; lng: number }, stops: RouteStop[]) => {
+    let minD = Infinity, idx = 0;
     stops.forEach((s, i) => {
       const d = calculateDistance(loc.lat, loc.lng, s.lat, s.lng);
-      if (d < minD) {
-        minD = d;
-        idx = i;
-      }
+      if (d < minD) { minD = d; idx = i; }
     });
     return idx;
   };
 
   function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-    const R = 6371;
+    const R    = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const a    = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
   const animateMarker = useCallback((targetCoords: [number, number], heading?: number) => {
     if (!busMarkerRef.current) return;
-    const marker = busMarkerRef.current;
+    const marker     = busMarkerRef.current;
     const startCoords = marker.getLngLat();
-    const startTime = performance.now();
-    const duration = 3000;
+    const startTime   = performance.now();
+    const duration    = 3000;
 
-    const startLngLat = [startCoords.lng, startCoords.lat] as [number, number];
+    const startLngLat  = [startCoords.lng, startCoords.lat] as [number, number];
     const finalHeading = heading ?? (prevCoordsRef.current ? calculateBearing(prevCoordsRef.current, targetCoords) : 0);
     prevCoordsRef.current = targetCoords;
 
     const frame = (now: number) => {
-      const elapsed = now - startTime;
+      const elapsed  = now - startTime;
       const progress = Math.min(elapsed / duration, 1);
-
       const lng = startLngLat[0] + (targetCoords[0] - startLngLat[0]) * progress;
       const lat = startLngLat[1] + (targetCoords[1] - startLngLat[1]) * progress;
-
       marker.setLngLat([lng, lat]);
       const el = marker.getElement();
       el.style.transform = `rotate(${finalHeading}deg)`;
-
-      if (progress < 1) {
-        animationFrameRef.current = requestAnimationFrame(frame);
-      }
+      if (progress < 1) animationFrameRef.current = requestAnimationFrame(frame);
     };
 
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     animationFrameRef.current = requestAnimationFrame(frame);
   }, []);
 
+  // ── Map init ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -195,14 +185,7 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
       container: mapContainerRef.current,
       style: {
         version: 8,
-        sources: {
-          osm: {
-            type: "raster",
-            tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            attribution: "© OpenStreetMap contributors"
-          }
-        },
+        sources: { osm: { type: "raster", tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
         layers: [{ id: "osm", type: "raster", source: "osm" }]
       },
       center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat],
@@ -212,19 +195,15 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
     map.on('load', () => {
       map.addControl(new maplibregl.NavigationControl(), 'top-right');
-      
+
+      // College marker
       const el = document.createElement('div');
       el.className = 'college-marker';
-      el.style.backgroundImage = `url(${jgiLogo})`;
-      el.style.width = '45px';
-      el.style.height = '45px';
-      el.style.backgroundSize = 'contain';
-      el.style.backgroundRepeat = 'no-repeat';
-      el.style.cursor = 'pointer';
-      el.style.borderRadius = '50%';
-      el.style.backgroundColor = 'white';
-      el.style.boxShadow = '0 0 10px rgba(0,0,0,0.2)';
-
+      Object.assign(el.style, {
+        backgroundImage: `url(${jgiLogo})`, width: '45px', height: '45px',
+        backgroundSize: 'contain', backgroundRepeat: 'no-repeat', cursor: 'pointer',
+        borderRadius: '50%', backgroundColor: 'white', boxShadow: '0 0 10px rgba(0,0,0,0.2)',
+      });
       new maplibregl.Marker(el)
         .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
         .setPopup(new maplibregl.Popup().setHTML('JCET College'))
@@ -235,16 +214,12 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
         navigator.geolocation.getCurrentPosition((position) => {
           const { latitude, longitude } = position.coords;
           const userEl = document.createElement('div');
-          userEl.className = 'user-marker';
           Object.assign(userEl.style, {
             width: '15px', height: '15px', borderRadius: '50%',
             backgroundColor: '#3b82f6', border: '2px solid white',
             boxShadow: '0 0 10px rgba(59, 130, 246, 0.5)'
           });
-          userMarkerRef.current = new maplibregl.Marker(userEl)
-            .setLngLat([longitude, latitude])
-            .addTo(map);
-          
+          userMarkerRef.current = new maplibregl.Marker(userEl).setLngLat([longitude, latitude]).addTo(map);
           map.easeTo({ center: [longitude, latitude], zoom: 14 });
         });
       }
@@ -254,22 +229,32 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
+  // ── Bus location update + offline detection ─────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map || locations.length === 0) return;
 
     const loc = locations[0];
+    const isOnline = loc.driverOnline !== false;
+
+    setIsOffline(!isOnline);
+    setLiveSpeed(loc.speed ?? null);
+
+    // Reset offline timer on new data
+    if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+    if (isOnline) {
+      lastUpdateRef.current = Date.now();
+      offlineTimerRef.current = setTimeout(() => setIsOffline(true), 15_000);
+    }
+
     if (!busMarkerRef.current) {
       const el = document.createElement('div');
       el.className = 'bus-marker';
-      el.style.backgroundImage = `url(${busIcon})`;
-      el.style.width = '50px';
-      el.style.height = '50px';
-      el.style.backgroundSize = 'contain';
-      el.style.backgroundRepeat = 'no-repeat';
-      el.style.transition = 'transform 0.3s ease-out';
-      el.style.cursor = 'pointer';
-
+      Object.assign(el.style, {
+        backgroundImage: `url(${busIcon})`, width: '50px', height: '50px',
+        backgroundSize: 'contain', backgroundRepeat: 'no-repeat',
+        transition: 'transform 0.3s ease-out', cursor: 'pointer',
+      });
       busMarkerRef.current = new maplibregl.Marker(el)
         .setLngLat([loc.lng, loc.lat])
         .setPopup(new maplibregl.Popup().setHTML(`<strong>Bus: ${loc.busId}</strong>`))
@@ -278,11 +263,16 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
     animateMarker([loc.lng, loc.lat], loc.heading);
     updateLiveRoute(loc);
-    
+
     if (role === "student" && mapRef.current) {
       mapRef.current.easeTo({ center: [loc.lng, loc.lat], duration: 1000 });
     }
   }, [locations, updateLiveRoute, animateMarker, role]);
+
+  // Cleanup offline timer on unmount
+  useEffect(() => () => {
+    if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (selectedStopData) {
@@ -296,22 +286,27 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
 
   return (
     <div className="relative w-full h-screen" data-testid="bus-map">
+      {/* Missed bus alert */}
       {isMissed && routeData && selectedStopData && (
         <div className="absolute top-4 left-4 right-4 z-50">
           <MissedBusAlert routeName={routeData.name} stopName={selectedStopData.name} departureTime={selectedStopData.scheduledTime} />
         </div>
       )}
 
+      {/* Search bar */}
       <div className="absolute top-4 left-4 right-4 z-50" style={{ top: isMissed ? "140px" : "16px" }}>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-          <Input type="search" placeholder="Search destination" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          <Input type="search" placeholder="Search destination" value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
             className="w-full rounded-full pl-10 pr-4 py-3 bg-white shadow-lg border-none focus:ring-2 focus:ring-yellow-400" />
         </div>
       </div>
 
+      {/* ETA / Stop info panel */}
       {selectedStopData && eta !== null && !isMissed && (
-        <div className="absolute top-20 left-4 right-4 z-50 bg-white/95 backdrop-blur rounded-lg p-4 shadow-lg" style={{ top: isMissed ? "200px" : "80px" }}>
+        <div className="absolute z-50 bg-white/95 backdrop-blur rounded-lg p-4 shadow-lg left-4 right-4"
+          style={{ top: isMissed ? "200px" : "80px" }}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Your Stop</p>
@@ -325,25 +320,54 @@ export default function BusMap({ routeId, selectedStop, showAllBuses = false, ro
             </div>
           </div>
           <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground"> 
+            <p className="text-xs text-muted-foreground">
               {eta === -1 ? "Bus has already passed your stop" : `Expected arrival: ${new Date(Date.now() + eta * 60000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
             </p>
-            <span className={`text-xs px-2 py-1 rounded-full ${isConnected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-              {isConnected ? "Live" : "Offline"}
-            </span>
+            <div className="flex items-center gap-2">
+              {liveSpeed !== null && (
+                <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                  {liveSpeed.toFixed(0)} km/h
+                </span>
+              )}
+              <span className={`text-xs px-2 py-1 rounded-full ${isConnected && !isOffline ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                {isConnected && !isOffline ? "Live" : "Offline"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Driver offline banner */}
+      {isOffline && locations.length > 0 && (
+        <div className="absolute bottom-36 left-4 right-4 z-50">
+          <div className="bg-gray-900/90 text-white rounded-xl p-4 flex items-center gap-3 shadow-xl">
+            <div className="p-2 bg-red-500 rounded-lg flex-shrink-0">
+              <WifiOff className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">Driver Offline</p>
+              <p className="text-xs text-gray-300">Showing last known location. Reconnecting…</p>
+            </div>
+            <div className="ml-auto">
+              <Signal className="h-5 w-5 text-red-400 animate-pulse" />
+            </div>
           </div>
         </div>
       )}
 
       <div ref={mapContainerRef} className="w-full h-full" />
-      
+
+      {/* Zoom controls */}
       <div className="absolute bottom-28 right-4 z-50 flex flex-col gap-2">
         <div className="flex flex-col overflow-hidden rounded-lg bg-white shadow-md">
           <Button size="icon" variant="ghost" onClick={() => mapRef.current?.zoomIn()} className="h-11 w-11 rounded-none"><Plus className="h-5 w-5" /></Button>
-          <hr className="border-gray-200" /><Button size="icon" variant="ghost" onClick={() => mapRef.current?.zoomOut()} className="h-11 w-11 rounded-none"><Minus className="h-5 w-5" /></Button>
+          <hr className="border-gray-200" />
+          <Button size="icon" variant="ghost" onClick={() => mapRef.current?.zoomOut()} className="h-11 w-11 rounded-none"><Minus className="h-5 w-5" /></Button>
         </div>
         <Button size="icon" onClick={() => mapRef.current?.flyTo({ center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat], zoom: 14 })}
-          className="h-11 w-11 rounded-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 shadow-md"><Navigation className="h-5 w-5" /></Button>
+          className="h-11 w-11 rounded-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 shadow-md">
+          <Navigation className="h-5 w-5" />
+        </Button>
       </div>
     </div>
   );
