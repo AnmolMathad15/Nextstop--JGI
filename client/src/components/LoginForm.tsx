@@ -121,9 +121,10 @@ export default function LoginForm({ role, onLogin, onSwitchRole }: LoginFormProp
                 data-testid="img-login-logo"
               />
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight" data-testid="text-login-title">
-              <span style={{ color: "#1e3a6e" }}>JCET </span>
-              <span style={{ color: "#f59e0b" }}>HUB</span>
+            <h1 className="nextstop-brand text-4xl" data-testid="text-login-title">
+              <span style={{ color: "#1e3a6e" }}>Next</span>
+              <span style={{ color: "#f59e0b" }}>Stop</span>
+              <span style={{ color: "#1e3a6e" }}> JGI</span>
             </h1>
             <p className="text-sm font-semibold text-gray-700 mt-0.5">Jain College of Engineering and Technology</p>
             <p className="text-xs tracking-widest text-gray-400 uppercase mt-0.5">Smart Campus Portal</p>

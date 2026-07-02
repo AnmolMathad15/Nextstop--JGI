@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,800;1,700&family=Poppins:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,6 +10,22 @@ html, body {
   background-size: cover;
   background-attachment: fixed;
   color: white;
+}
+
+.login-bg-overlay {
+  background: linear-gradient(
+    135deg,
+    rgba(10, 25, 60, 0.82) 0%,
+    rgba(15, 40, 90, 0.65) 40%,
+    rgba(180, 100, 0, 0.25) 100%
+  );
+}
+
+.nextstop-brand {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-style: italic;
+  font-weight: 800;
+  letter-spacing: -0.5px;
 }
 
 .glass-morphism {
