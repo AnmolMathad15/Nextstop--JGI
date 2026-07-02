@@ -1,0 +1,57 @@
+I'm adding custom branded stop markers to NextStop JGI's Leaflet map. 
+Stack: React 18 + TypeScript, Leaflet + React-Leaflet, Drizzle ORM + 
+PostgreSQL, Node/Express backend.
+
+I have 6 bus routes (Keshwapur, PG Route, Siddaroodh Math, Gadag Road, 
+Dharwad, Navanagar) each with 6-17 named stops, each with two timing 
+batches (8:15 AM and 10:15 AM). I have the full stop list with names 
+and times but NOT coordinates yet.
+
+Implement in this order:
+
+1. SCHEMA
+   - Add/extend Drizzle tables: `routes` (id, name), `stops` (id, 
+     route_id, name, sequence_order, latitude, longitude, 
+     time_batch_815am, time_batch_1015am).
+   - Write a migration for this.
+
+2. SEED DATA
+   - Create a seed script (server/seed.ts or similar) with all stops 
+     from the attached route data [paste your full stop list here — 
+     I'll provide it], WITHOUT coordinates initially (lat/lng as null).
+
+3. GEOCODING SCRIPT (one-time, not runtime)
+   - Write a standalone Node script (scripts/geocode-stops.ts) that:
+     a) Reads all stops with null coordinates from the DB
+     b) Queries Nominatim (https://nominatim.openstreetmap.org/search) 
+        with query = `${stopName}, Hubballi-Dharwad, Karnataka, India`
+     c) Respects Nominatim's usage policy (1 request/sec, proper 
+        User-Agent header)
+     d) Updates each stop's lat/lng in the DB
+     e) Logs any stop that fails to geocode or returns low-confidence 
+        results, so I can manually correct those (e.g. ambiguous names 
+        like "Old Bus Stand" which appears in multiple routes)
+   - This script runs once via `npm run geocode`, not on every request.
+
+4. CUSTOM JGI MARKER COMPONENT
+   - Create a React-Leaflet custom divIcon marker component 
+     `<JGIStopMarker>` that renders:
+     - The JGI circular emblem/logo as the pin icon (use the existing 
+       logo asset from the header)
+     - A permanent Leaflet Tooltip (not just on-hover) showing 
+       "{STOP_NAME} JGI STOP" in small bold text, positioned above 
+       the pin
+     - Distinguish main stops (larger icon) vs sub-stops (smaller icon) 
+       if I mark certain stops as `isMainStop: boolean` in the schema
+   - On click/tap, show a popup with stop name + both timing batches.
+
+5. RENDER ON MAP
+   - When a route is selected, fetch its stops (ordered by 
+     sequence_order) via TanStack Query and render a <JGIStopMarker> 
+     for each, connected by a Polyline in route sequence.
+
+Show me:
+1. The Drizzle schema addition
+2. The geocoding script
+3. The JGIStopMarker component
+4. Updated Map page wiring it together

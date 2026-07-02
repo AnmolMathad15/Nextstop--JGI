@@ -30,7 +30,10 @@ export const routeStops = pgTable("route_stops", {
   lat: real("lat").notNull(),
   lng: real("lng").notNull(),
   scheduledTime: text("scheduled_time").notNull(),
+  time1015am: text("time_1015am"), // 10:15 AM batch scheduled time
   sequence: integer("sequence").notNull(),
+  isMainStop: boolean("is_main_stop").default(false), // landmark/major stop
+  physicalStopKey: text("physical_stop_key"), // dedup key for geocoding
   radius: real("radius").default(0.1), // geofence radius in km (100m)
 });
 
@@ -130,7 +133,8 @@ export const insertRouteSchema = createInsertSchema(routes).pick({
   name: true, displayOrder: true, isActive: true, speedLimit: true,
 });
 export const insertRouteStopSchema = createInsertSchema(routeStops).pick({
-  routeId: true, name: true, lat: true, lng: true, scheduledTime: true, sequence: true, radius: true,
+  routeId: true, name: true, lat: true, lng: true, scheduledTime: true,
+  time1015am: true, sequence: true, isMainStop: true, physicalStopKey: true, radius: true,
 });
 export const insertBusSchema = createInsertSchema(buses).pick({
   number: true, capacity: true, isActive: true,
