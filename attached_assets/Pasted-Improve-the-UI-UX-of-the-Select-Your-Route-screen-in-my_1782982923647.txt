@@ -1,0 +1,48 @@
+Improve the UI/UX of the "Select Your Route" screen in my Nextstop JGI 
+student dashboard (bus tracking app). Current stack: [React/Next.js — 
+adjust if different]. Make the following changes:
+
+1. BACKGROUND
+   - Replace or overlay the current background photo with a dark gradient 
+     scrim (e.g. linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.6))) on top 
+     of the image so text and cards have consistent contrast regardless 
+     of what's behind them.
+   - Alternatively, provide a toggle/config to swap the photo for a solid 
+     brand gradient background (teal #0d9488 to blue #2563eb, matching the 
+     top header bar) as a fallback.
+
+2. HEADER CONSISTENCY
+   - Extend the teal-to-blue gradient currently used as a thin top strip 
+     into the full header background (or as a bottom border/accent under 
+     the nav), so it feels intentional rather than a leftover banner.
+
+3. ROUTE CARDS — add more live data per card:
+   - Route name + stop count (existing)
+   - Live status indicator: colored dot (green = on route, amber = delayed, 
+     gray = not started yet)
+   - Next arrival ETA (e.g. "Next bus in 8 min")
+   - Optional: distance from user's current location if geolocation is 
+     available
+   - Color-code the pin icon per route/zone instead of using the same 
+     teal circle for all, so returning users can scan faster
+
+4. COLOR CONSISTENCY
+   - Standardize the "active state" accent color across the top gradient, 
+     bottom nav active icon, and any highlighted UI elements — currently 
+     the bottom nav uses yellow while the header uses teal/blue. Pick one 
+     accent (I'd lean teal) and apply it everywhere.
+
+5. EMPTY / LOADING STATES
+   - Add a loading skeleton for route cards while data fetches.
+   - Add an empty state ("No live bus data for this route right now") for 
+     routes with no active bus, instead of letting the user click into a 
+     dead map.
+
+6. RESPONSIVENESS
+   - Make the route card list full-width with proper padding on mobile 
+     breakpoints instead of shrinking a fixed desktop layout. Cards should 
+     go edge-to-edge with ~16px side margins under 480px viewport width.
+
+Keep all existing functionality (routing to map view via the chevron 
+arrow, existing route names/stop counts) untouched — only redesign the 
+visual/UX layer described above. Show me the updated component code.

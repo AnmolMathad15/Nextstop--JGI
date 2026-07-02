@@ -43,7 +43,7 @@ export default function BottomNavigation({ activeItem, onNavigate, variant = "st
               className={cn(
                 "flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg transition-colors min-w-[60px]",
                 isActive
-                  ? "text-yellow-600 dark:text-yellow-500"
+                  ? "text-teal-600 dark:text-teal-400"
                   : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
               )}
               data-testid={`nav-item-${item.id}`}
