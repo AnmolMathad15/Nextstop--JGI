@@ -17,13 +17,12 @@ interface AppHeaderProps {
 
 export default function AppHeader({ userName, userRole, onLogout, showMenu = true }: AppHeaderProps) {
   return (
-    <header
-      className="flex items-center justify-between px-4 py-3 shadow-md"
-      style={{ background: "linear-gradient(135deg, #0d9488, #2563eb)" }}
+    <header 
+      className="flex items-center justify-between px-4 py-3 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md shadow-md"
       data-testid="app-header"
     >
       <div className="flex items-center gap-3">
-        <div className="p-1 bg-white/20 rounded-full shadow-lg">
+        <div className="p-1 bg-yellow-400 rounded-full shadow-lg animate-pulse-glow">
           <img
             src={appLogo}
             alt="Nextstop JGI Logo"
@@ -32,11 +31,11 @@ export default function AppHeader({ userName, userRole, onLogout, showMenu = tru
           />
         </div>
         <div>
-          <h1 className="nextstop-brand text-xl text-white tracking-tight" data-testid="text-app-name">
-            NextStop JGI
+          <h1 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight" data-testid="text-app-name">
+            Nextstop JGI
           </h1>
           {userRole && (
-            <span className="text-xs text-white/70 capitalize" data-testid="text-user-role">
+            <span className="text-xs text-muted-foreground capitalize" data-testid="text-user-role">
               {userRole} Dashboard
             </span>
           )}
@@ -46,13 +45,13 @@ export default function AppHeader({ userName, userRole, onLogout, showMenu = tru
       {showMenu && (
         <div className="flex items-center gap-2">
           {userName && (
-            <span className="text-sm font-medium text-white/90 hidden sm:block" data-testid="text-user-name">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 hidden sm:block" data-testid="text-user-name">
               {userName}
             </span>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" className="text-white hover:bg-white/20" data-testid="button-menu">
+              <Button size="icon" variant="ghost" data-testid="button-menu">
                 <Menu className="h-5 w-5" />
               </Button>
             </DropdownMenuTrigger>
