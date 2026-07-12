@@ -11,7 +11,7 @@ import {
   type ProcessedLocation,
   type LocationAlert,
 } from "./locationService";
-import { snapToRoad, clearMapMatchState } from "./mapMatching";
+import { snapToRoad, clearMapMatchState } from "../mapMatching";
 
 interface LocationUpdate {
   tripId: string;
