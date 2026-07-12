@@ -11,6 +11,9 @@ export interface LocationUpdate {
   accuracy?: number;
   timestamp?: number;
   driverOnline?: boolean;
+  snappedLat?: number;  // road-matched position (falls back to lat if OSRM didn't snap)
+  snappedLng?: number;
+  roadSnapped?: boolean;
 }
 
 export interface FleetAlertPayload {
