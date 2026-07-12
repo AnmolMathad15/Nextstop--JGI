@@ -43,6 +43,9 @@ interface LiveLocation {
   heading?: number;
   accuracy?: number;
   driverOnline?: boolean;
+  snappedLat?: number; // road-matched position from server-side OSRM map matching
+  snappedLng?: number;
+  roadSnapped?: boolean;
 }
 
 interface BusMapProps {
@@ -366,6 +369,12 @@ export default function BusMap({
     setIsOffline(loc.driverOnline === false);
     setLiveSpeed(loc.speed ?? null);
 
+    // Prefer the road-snapped position (server-side OSRM map matching) so the
+    // bus glides along the actual road instead of floating over buildings.
+    // Falls back to raw GPS whenever a snap wasn't available for this fix.
+    const dispLat = loc.snappedLat ?? loc.lat;
+    const dispLng = loc.snappedLng ?? loc.lng;
+
     // Create bus marker on first GPS ping
     if (!busMarkerRef.current) {
       const wrapper = document.createElement("div");
@@ -378,14 +387,14 @@ export default function BusMap({
       icon.className = "nextstop-bus-icon";
       wrapper.appendChild(icon);
       busMarkerRef.current = new maplibregl.Marker({ element: wrapper, anchor: "center" })
-        .setLngLat([loc.lng, loc.lat])
+        .setLngLat([dispLng, dispLat])
         .addTo(map);
     }
 
-    animateMarker([loc.lng, loc.lat], loc.heading);
-    if (routeData) updateStopETAs(loc, routeData.stops);
+    animateMarker([dispLng, dispLat], loc.heading);
+    if (routeData) updateStopETAs({ ...loc, lat: dispLat, lng: dispLng }, routeData.stops);
     if (role === "student") {
-      map.easeTo({ center: [loc.lng, loc.lat], duration: 1500 });
+      map.easeTo({ center: [dispLng, dispLat], duration: 1500 });
     }
 
     // Offline detection — 15 s silence = offline
@@ -515,7 +524,8 @@ export default function BusMap({
           className="h-10 w-10 rounded-full bg-white text-gray-700 shadow-md hover:bg-gray-50 border border-gray-200"
           onClick={() => {
             if (locations.length > 0) {
-              mapRef.current?.flyTo({ center: [locations[0].lng, locations[0].lat], zoom: 15 });
+              const l = locations[0] as LiveLocation;
+              mapRef.current?.flyTo({ center: [l.snappedLng ?? l.lng, l.snappedLat ?? l.lat], zoom: 15 });
             } else {
               mapRef.current?.flyTo({ center: [JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat], zoom: 14 });
             }
