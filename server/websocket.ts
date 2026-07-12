@@ -11,6 +11,7 @@ import {
   type ProcessedLocation,
   type LocationAlert,
 } from "./locationService";
+import { snapToRoad, clearMapMatchState } from "./mapMatching";
 
 interface LocationUpdate {
   tripId: string;
@@ -68,6 +69,7 @@ export function setupWebSocket(server: Server) {
         clearOfflineTimer(info.tripId);
         latestLocations.delete(info.tripId);
         lastUpdateTime.delete(info.tripId);
+        clearMapMatchState(info.tripId);
       }
       clients.delete(ws);
     });
@@ -149,7 +151,6 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
     provider: "mobile_gps",
   };
 
-  latestLocations.set(info.tripId, processed);
   lastUpdateTime.set(info.tripId, Date.now());
   scheduleOfflineCheck(info.tripId, wss, message.routeId);
 
@@ -163,8 +164,14 @@ async function handleLocationUpdate(ws: WebSocket, message: LocationUpdate, wss:
     accuracy: processed.accuracy,
   }).catch(console.error);
 
+  // Road-snap for display — raw `processed` (unsnapped) still drives geofencing/
+  // analytics below, so stop-arrival logic is never affected by a bad map-match.
+  const snap = await snapToRoad(info.tripId, processed.lat, processed.lng, processed.timestamp);
+  const displayLocation = { ...processed, snappedLat: snap.lat, snappedLng: snap.lng, roadSnapped: snap.snapped };
+  latestLocations.set(info.tripId, displayLocation);
+
   // Broadcast bus:update to relevant subscribers
-  const broadcastPayload = JSON.stringify({ type: "bus:update", location: processed });
+  const broadcastPayload = JSON.stringify({ type: "bus:update", location: displayLocation });
   wss.clients.forEach(client => {
     if (client !== ws && client.readyState === WebSocket.OPEN) {
       const ci = clients.get(client);
@@ -312,6 +319,7 @@ async function handleTripEnd(ws: WebSocket, message: { tripId: string }, wss: We
       clearOfflineTimer(message.tripId);
       latestLocations.delete(message.tripId);
       lastUpdateTime.delete(message.tripId);
+      clearMapMatchState(message.tripId);
       info.tripId = undefined;
       clients.set(ws, info);
 
