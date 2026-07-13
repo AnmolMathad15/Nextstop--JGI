@@ -44,8 +44,8 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
   // Battery optimisation: track last transmitted position
   const lastSentRef    = useRef<{ lat: number; lng: number; ts: number } | null>(null);
   const watchIdRef     = useRef<number | null>(null);
-  const MIN_MOVE_KM    = 0.01; // 10 meters
-  const MIN_INTERVAL_MS = 2_000;
+  const MIN_MOVE_KM    = 0.003; // 3 meters — fine-grained enough to track continuous movement smoothly
+  const MIN_INTERVAL_MS = 1_000; // send at most once per second even while moving fast
 
   // ── Check GPS permission on mount ─────────────────────────────────────────
   useEffect(() => {

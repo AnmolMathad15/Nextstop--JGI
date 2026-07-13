@@ -27,11 +27,20 @@ let _lastUpdated = '';
 // Animation state for smooth bus position interpolation
 let _animFrameId: number | null = null;
 let _currentBusPos: [number, number] | null = null;
+let _lastFixAt: number | null = null; // performance.now() of the previous GPS fix
+
+// Bounds for the glide duration so it always matches how often real fixes arrive,
+// instead of a fixed guess that drifts out of sync with the driver's actual movement.
+const MIN_GLIDE_MS = 400;
+const MAX_GLIDE_MS = 4000;
+const DEFAULT_GLIDE_MS = 1200; // used for the very first fix, when there's no prior interval
 
 /**
  * Smoothly animates the bus marker from its current position to the new GPS fix.
- * Uses requestAnimationFrame with ease-out-cubic interpolation so the dot glides
- * fluidly even when GPS updates arrive 10-15 seconds apart.
+ * Uses requestAnimationFrame with ease-out interpolation, timed to match the actual
+ * interval between this fix and the previous one — so a fast-moving bus (fixes every
+ * ~1s) glides briskly and a slow/stationary bus (fixes every 10-15s) still glides
+ * smoothly without lagging behind real device movement.
  * Road-snapped coordinates (snappedLat/Lng from server) should be passed when available.
  */
 export function updateBusPosition(lng: number, lat: number, speed: number, busId: string) {
@@ -51,9 +60,15 @@ export function updateBusPosition(lng: number, lat: number, speed: number, busId
     _animFrameId = null;
   }
 
-  // 3-second glide — smooth between typical 5-15s GPS update intervals
-  const DURATION_MS = 3000;
-  const startTime = performance.now();
+  const now0 = performance.now();
+  const measuredInterval = _lastFixAt !== null ? now0 - _lastFixAt : DEFAULT_GLIDE_MS;
+  // Glide for roughly the real gap between fixes (clamped) so motion tracks the
+  // device in near real-time — brisk when moving fast/updating often, still smooth
+  // when updates are sparse.
+  const DURATION_MS = Math.min(MAX_GLIDE_MS, Math.max(MIN_GLIDE_MS, measuredInterval));
+  _lastFixAt = now0;
+
+  const startTime = now0;
 
   function animate(now: number) {
     const t = Math.min((now - startTime) / DURATION_MS, 1);
@@ -80,8 +95,8 @@ export function updateBusPosition(lng: number, lat: number, speed: number, busId
   _animFrameId = requestAnimationFrame(animate);
   _currentBusPos = toPos; // update target immediately for next call
 
-  // Smooth camera follow — easeTo is non-jarring, longer than panTo
-  _mapInstance.easeTo({ center: [lng, lat], duration: 2000, essential: false });
+  // Smooth camera follow, timed to the same interval as the marker glide
+  _mapInstance.easeTo({ center: [lng, lat], duration: DURATION_MS, essential: false });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -521,13 +536,12 @@ export default function BusMap({
     if (map?.getLayer('live-bus-layer')) map.setLayoutProperty('live-bus-layer', 'visibility', 'visible');
     if (map?.getLayer('live-bus-pulse')) map.setLayoutProperty('live-bus-pulse', 'visibility', 'visible');
 
+    // updateBusPosition already pans the camera to the new fix (timed to match
+    // the real interval between fixes) — a second, independently-timed easeTo here
+    // would fight it and make the camera jerk instead of glide.
     updateBusPosition(dispLng, dispLat, loc.speed ?? 0, loc.busId ?? 'BUS-01');
 
     if (routeData) updateStopETAs({ ...loc, lat: dispLat, lng: dispLng }, routeData.stops);
-
-    if (role === 'student' && mapRef.current) {
-      mapRef.current.easeTo({ center: [dispLng, dispLat], duration: 1500 });
-    }
   }, [locations, routeData, updateStopETAs, role]);
 
   // ── Fly to stop ────────────────────────────────────────────────────────────
