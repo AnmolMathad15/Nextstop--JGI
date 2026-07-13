@@ -43,7 +43,7 @@ A real-time college bus tracking application built for JCET College. It allows s
 - **Dependencies**: ✅ installed (re-run `npm install` after any fresh import — `node_modules` is not preserved)
 - **DATABASE_URL**: ✅ Replit PostgreSQL provisioned; schema applied via `npm run db:push`
 - **SESSION_SECRET**: ✅ Replit secret
-- **VITE_MAPBOX_TOKEN**: ✅ Replit secret — required for Mapbox GL JS map
+- **VITE_MAPBOX_TOKEN**: ✅ Replit secret — required for Mapbox GL JS map (must be re-entered after each reimport; not preserved by git)
 - **VITE_MAPBOX_STYLE**: ✅ set in `.replit` shared env (`mapbox://styles/anmol-15/cmra6hgfg001h01quhh5j42i4`)
 - **OSRM_BASE_URL**: ⚠️ set to a local IP — needs a real OSRM endpoint for route calculations (non-critical)
 
