@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "outDir": ".vercel/output"
+  },
+  "include": ["api/**/*", "server/**/*", "shared/**/*"]
+}

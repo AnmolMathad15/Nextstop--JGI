@@ -340,6 +340,118 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Polling endpoint (Vercel / serverless fallback) ──────────────────────────
+  // Students on Vercel Hobby poll this every 3 s when WS is unavailable.
+  // Returns the latest location for every active trip from the DB.
+  app.get("/api/tracking/poll", async (_req, res) => {
+    try {
+      const trips     = await storage.getActiveTrips();
+      const locations = (
+        await Promise.all(trips.map(t => storage.getLatestLocationForTrip(t.id)))
+      ).filter(Boolean);
+      res.json(locations);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to poll locations" });
+    }
+  });
+
+  // ── REST driver actions (Vercel serverless replaces WebSocket messages) ───────
+
+  /**
+   * POST /api/driver/location
+   * Driver sends GPS location via REST (Vercel polling mode).
+   * Validates the fix, stores it in live_locations, and returns the
+   * (possibly smoothed) speed.  WebSocket broadcast is deliberately
+   * skipped here — students pick up the update on their next poll to
+   * GET /api/tracking/poll.
+   */
+  app.post("/api/driver/location", async (req, res) => {
+    try {
+      const { tripId, routeId, busId, lat, lng, speed, heading, accuracy } = req.body;
+      if (!tripId || !routeId || !busId || lat == null || lng == null) {
+        return res.status(400).json({ error: "tripId, routeId, busId, lat, lng are required" });
+      }
+
+      const { validateLocation, recordGPSPoint, getSmoothedSpeed } =
+        await import("./locationService");
+
+      // Basic validation (heading/accuracy/speed bounds)
+      const raw = {
+        tripId, routeId, busId: String(busId), driverId: "",
+        lat, lng, speed: speed ?? 0, heading: heading ?? 0,
+        accuracy: accuracy ?? 5, timestamp: Date.now(),
+        provider: "mobile_gps" as const,
+      };
+      const validated = validateLocation(raw);
+      if (!validated.isValid) {
+        return res.status(422).json({ error: validated.validationError });
+      }
+
+      // Feed the GPS buffer so smoothed speed is accurate
+      recordGPSPoint(tripId, { lat, lng, speed: speed ?? 0, heading: heading ?? 0, timestamp: Date.now() });
+      const smoothedSpeed = getSmoothedSpeed(tripId);
+
+      await storage.appendLiveLocation({ tripId, lat, lng, speed: smoothedSpeed, heading, accuracy });
+
+      res.json({ ok: true, speed: smoothedSpeed });
+    } catch (error) {
+      console.error("REST location error:", error);
+      res.status(500).json({ error: "Failed to process location" });
+    }
+  });
+
+  /** POST /api/driver/trip/start — REST equivalent of trip:start WS message */
+  app.post("/api/driver/trip/start", async (req, res) => {
+    try {
+      const { driverId, busId, routeId } = req.body;
+      if (!driverId || !busId || !routeId) {
+        return res.status(400).json({ error: "driverId, busId, routeId are required" });
+      }
+      const existing = await storage.getActiveTripByDriver(driverId);
+      if (existing) await storage.endTrip(existing.id);
+      const trip = await storage.createTrip({ driverId, busId, routeId });
+      res.json({ tripId: trip.id });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to start trip" });
+    }
+  });
+
+  /** POST /api/driver/trip/end */
+  app.post("/api/driver/trip/end", async (req, res) => {
+    try {
+      const { tripId } = req.body;
+      if (!tripId) return res.status(400).json({ error: "tripId is required" });
+      const trip = await storage.endTrip(tripId);
+      res.json({ ok: !!trip });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to end trip" });
+    }
+  });
+
+  /** POST /api/driver/trip/pause */
+  app.post("/api/driver/trip/pause", async (req, res) => {
+    try {
+      const { tripId } = req.body;
+      if (!tripId) return res.status(400).json({ error: "tripId is required" });
+      await storage.pauseTrip(tripId);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to pause trip" });
+    }
+  });
+
+  /** POST /api/driver/trip/resume */
+  app.post("/api/driver/trip/resume", async (req, res) => {
+    try {
+      const { tripId } = req.body;
+      if (!tripId) return res.status(400).json({ error: "tripId is required" });
+      await storage.resumeTrip(tripId);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to resume trip" });
+    }
+  });
+
   // ── Notifications history ────────────────────────────────────────────────────
 
   app.get("/api/notifications", async (req, res) => {
