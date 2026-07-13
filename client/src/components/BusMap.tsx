@@ -25,18 +25,64 @@ let _mapInstance: mapboxgl.Map | null = null;
 let _lastUpdated = '';
 let _simInterval: ReturnType<typeof setInterval> | null = null;
 
-/** High-performance bus position update — mutates GeoJSON source, no DOM recreation. */
+// Animation state for smooth bus position interpolation
+let _animFrameId: number | null = null;
+let _currentBusPos: [number, number] | null = null;
+
+/**
+ * Smoothly animates the bus marker from its current position to the new GPS fix.
+ * Uses requestAnimationFrame with ease-out-cubic interpolation so the dot glides
+ * fluidly even when GPS updates arrive 10-15 seconds apart.
+ * Road-snapped coordinates (snappedLat/Lng from server) should be passed when available.
+ */
 export function updateBusPosition(lng: number, lat: number, speed: number, busId: string) {
   if (!_mapInstance) return;
   const source = _mapInstance.getSource('live-bus-source') as mapboxgl.GeoJSONSource | undefined;
   if (!source) return;
+
   _lastUpdated = new Date().toLocaleTimeString();
-  source.setData({
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates: [lng, lat] },
-    properties: { speed, busId, lastUpdated: _lastUpdated },
-  });
-  _mapInstance.panTo([lng, lat], { duration: 1000 });
+
+  // Start from wherever the marker currently sits (or the target itself on first call)
+  const fromPos: [number, number] = _currentBusPos ?? [lng, lat];
+  const toPos: [number, number] = [lng, lat];
+
+  // Cancel any in-progress animation before starting the new one
+  if (_animFrameId !== null) {
+    cancelAnimationFrame(_animFrameId);
+    _animFrameId = null;
+  }
+
+  // 3-second glide — smooth between typical 5-15s GPS update intervals
+  const DURATION_MS = 3000;
+  const startTime = performance.now();
+
+  function animate(now: number) {
+    const t = Math.min((now - startTime) / DURATION_MS, 1);
+    // Ease-out cubic: fast start → smooth deceleration
+    const eased = 1 - Math.pow(1 - t, 3);
+
+    const iLng = fromPos[0] + (toPos[0] - fromPos[0]) * eased;
+    const iLat = fromPos[1] + (toPos[1] - fromPos[1]) * eased;
+
+    source.setData({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [iLng, iLat] },
+      properties: { speed, busId, lastUpdated: _lastUpdated },
+    });
+
+    if (t < 1) {
+      _animFrameId = requestAnimationFrame(animate);
+    } else {
+      _animFrameId = null;
+      _currentBusPos = toPos;
+    }
+  }
+
+  _animFrameId = requestAnimationFrame(animate);
+  _currentBusPos = toPos; // update target immediately for next call
+
+  // Smooth camera follow — easeTo is non-jarring, longer than panTo
+  _mapInstance.easeTo({ center: [lng, lat], duration: 2000, essential: false });
 }
 
 /** Auto-simulated tracking — runs once on map load to verify render + animation. */

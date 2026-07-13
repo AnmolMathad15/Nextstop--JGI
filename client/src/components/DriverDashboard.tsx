@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Play, Square, Pause, RotateCcw, MapPin, Navigation,
   Wifi, WifiOff, Clock, Users, Route, Gauge, Signal,
-  AlertTriangle, CheckCircle, BatteryLow,
+  AlertTriangle, CheckCircle, BatteryLow, LocateFixed, ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,8 @@ interface DriverDashboardProps {
 interface Bus     { id: string; number: string; capacity: number; isActive: boolean; }
 interface RouteData { id: number; name: string; displayOrder: number; isActive: boolean; }
 
+type GpsPermission = "unknown" | "requesting" | "granted" | "denied" | "unavailable";
+
 interface GPSState {
   lat: number;
   lng: number;
@@ -27,6 +29,7 @@ interface GPSState {
   heading: number | null;
   accuracy: number | null;
   status: "waiting" | "good" | "poor" | "error";
+  errorMessage?: string;
 }
 
 export default function DriverDashboard({ driverName, driverId, assignedBusId }: DriverDashboardProps) {
@@ -36,12 +39,33 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
   const [tripStartTime,  setTripStartTime]  = useState<Date | null>(null);
   const [locationSentCount, setLocationSentCount] = useState(0);
   const [tripDuration,   setTripDuration]   = useState("0:00");
+  const [gpsPermission,  setGpsPermission]  = useState<GpsPermission>("unknown");
 
   // Battery optimisation: track last transmitted position
   const lastSentRef    = useRef<{ lat: number; lng: number; ts: number } | null>(null);
   const watchIdRef     = useRef<number | null>(null);
   const MIN_MOVE_KM    = 0.01; // 10 meters
   const MIN_INTERVAL_MS = 2_000;
+
+  // ── Check GPS permission on mount ─────────────────────────────────────────
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGpsPermission("unavailable");
+      return;
+    }
+    // Use Permissions API if available to avoid triggering a prompt on load
+    if (navigator.permissions) {
+      navigator.permissions.query({ name: "geolocation" }).then((result) => {
+        if (result.state === "granted")        setGpsPermission("granted");
+        else if (result.state === "denied")    setGpsPermission("denied");
+        else                                    setGpsPermission("unknown"); // "prompt"
+        result.onchange = () => {
+          if (result.state === "granted")      setGpsPermission("granted");
+          else if (result.state === "denied")  setGpsPermission("denied");
+        };
+      }).catch(() => setGpsPermission("unknown"));
+    }
+  }, []);
 
   const { data: buses  = [] } = useQuery<Bus[]>({ queryKey: ["/api/buses"] });
   const { data: routes = [] } = useQuery<RouteData[]>({ queryKey: ["/api/routes"] });
@@ -106,9 +130,21 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
       },
       (err) => {
         console.error("Geolocation error:", err);
-        setGps(prev => prev ? { ...prev, status: "error" } : null);
+        let msg = "Unable to get location.";
+        if (err.code === err.PERMISSION_DENIED) {
+          msg = "Location access denied. Enable it in your browser settings and refresh.";
+          setGpsPermission("denied");
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          msg = "GPS signal unavailable. Move to an open area and try again.";
+        } else if (err.code === err.TIMEOUT) {
+          msg = "GPS timed out. Signal may be weak — retrying automatically.";
+        }
+        setGps(prev => prev
+          ? { ...prev, status: "error", errorMessage: msg }
+          : { lat: 0, lng: 0, speed: null, heading: null, accuracy: null, status: "error", errorMessage: msg }
+        );
       },
-      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
     );
 
     return () => {
@@ -117,6 +153,25 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
         watchIdRef.current = null;
       }
     };
+  }, [isTripActive, selectedRoute, selectedBus, isPaused, sendLocation]);
+
+  // ── 15-second heartbeat — keeps bus visible even when stationary at a stop ─
+  useEffect(() => {
+    if (!isTripActive || !selectedRoute || !selectedBus || isPaused) return;
+
+    const heartbeat = setInterval(() => {
+      const last = lastSentRef.current;
+      if (!last) return;
+      const sinceLastSend = Date.now() - last.ts;
+      // Only fire if watchPosition hasn't already sent in the last 12 seconds
+      if (sinceLastSend >= 12_000) {
+        sendLocation(parseInt(selectedRoute), selectedBus, last.lat, last.lng);
+        lastSentRef.current = { ...last, ts: Date.now() };
+        setLocationSentCount(c => c + 1);
+      }
+    }, 15_000);
+
+    return () => clearInterval(heartbeat);
   }, [isTripActive, selectedRoute, selectedBus, isPaused, sendLocation]);
 
   // ── Trip timer ──────────────────────────────────────────────────────────────
@@ -132,16 +187,24 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
   }, [tripStartTime]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleRequestPermission = useCallback(() => {
+    setGpsPermission("requesting");
+    navigator.geolocation.getCurrentPosition(
+      () => setGpsPermission("granted"),
+      (err) => {
+        setGpsPermission(err.code === err.PERMISSION_DENIED ? "denied" : "unknown");
+      },
+      { enableHighAccuracy: true, timeout: 10_000 }
+    );
+  }, []);
+
   const handleStartTrip = useCallback(() => {
-    if (!selectedBus || !selectedRoute) {
-      alert("Please select a bus and route first");
-      return;
-    }
+    if (!selectedBus || !selectedRoute) return; // button is disabled until both selected
     if (!navigator.geolocation) {
-      alert("Geolocation is not supported by your browser");
+      setGpsPermission("unavailable");
       return;
     }
-    setGps(g => g ? { ...g, status: "waiting" } : { lat: 0, lng: 0, speed: null, heading: null, accuracy: null, status: "waiting" });
+    setGps({ lat: 0, lng: 0, speed: null, heading: null, accuracy: null, status: "waiting" });
     startTrip(driverId, selectedBus, parseInt(selectedRoute));
     setTripStartTime(new Date());
     setLocationSentCount(0);
@@ -191,6 +254,56 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
           {isConnected ? "Connected" : "Offline"}
         </Badge>
       </div>
+
+      {/* GPS permission banner — shown when permission is not yet granted */}
+      {gpsPermission === "unavailable" && (
+        <Card className="border-red-300 bg-red-50 dark:bg-red-950">
+          <CardContent className="pt-4 flex items-start gap-3">
+            <ShieldAlert className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-700 text-sm">GPS Not Supported</p>
+              <p className="text-xs text-red-600 mt-1">
+                Your browser or device doesn't support GPS. Try opening this page in Chrome on your phone.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {gpsPermission === "denied" && (
+        <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950">
+          <CardContent className="pt-4 flex items-start gap-3">
+            <ShieldAlert className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-orange-700 text-sm">Location Access Blocked</p>
+              <p className="text-xs text-orange-600 mt-1">
+                Open your browser settings → Site permissions → Location → Allow for this site, then refresh the page.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {(gpsPermission === "unknown" || gpsPermission === "requesting") && !isTripActive && (
+        <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950">
+          <CardContent className="pt-4 flex items-center gap-3">
+            <LocateFixed className="h-5 w-5 text-blue-600 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-semibold text-blue-700 text-sm">Location Permission Required</p>
+              <p className="text-xs text-blue-600 mt-1">NextStop needs your location to broadcast your position to students.</p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-blue-400 text-blue-600 hover:bg-blue-100 flex-shrink-0"
+              onClick={handleRequestPermission}
+              disabled={gpsPermission === "requesting"}
+            >
+              {gpsPermission === "requesting" ? "Requesting…" : "Allow"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Bus & Route selector */}
       <Card>
@@ -290,11 +403,17 @@ export default function DriverDashboard({ driverName, driverId, assignedBusId }:
               </div>
             )}
 
-            {/* Accuracy warning */}
+            {/* Accuracy / error warnings */}
             {gps?.status === "poor" && (
-              <div className="flex items-center gap-2 text-sm text-orange-600 bg-orange-50 rounded-lg p-2">
+              <div className="flex items-center gap-2 text-sm text-orange-600 bg-orange-50 dark:bg-orange-950 rounded-lg p-2">
                 <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                <span>Weak GPS signal (±{gps.accuracy?.toFixed(0)}m). Move to open area.</span>
+                <span>Weak GPS signal (±{gps.accuracy?.toFixed(0)}m). Move to an open area.</span>
+              </div>
+            )}
+            {gps?.status === "error" && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 dark:bg-red-950 rounded-lg p-2">
+                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                <span>{gps.errorMessage || "GPS error. Check permissions and try again."}</span>
               </div>
             )}
 
