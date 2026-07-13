@@ -12,6 +12,7 @@ import { ROUTE_GEOJSON_COLOR, ALL_ROUTES_GEOJSON } from "@/lib/routeGeometry";
 import { BUS_STOPS_GEOJSON, parseStopName } from "@/lib/busStopsData";
 import { fetchRoadSnappedRoute, prefetchAllRoutes } from "@/lib/routeDirections";
 import jgiLogo from "@/assets/jgi-logo.png";
+import busMarkerIcon from "@/assets/live-bus-marker.png";
 
 // ── Mapbox token ───────────────────────────────────────────────────────────────
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
@@ -43,7 +44,7 @@ const DEFAULT_GLIDE_MS = 1200; // used for the very first fix, when there's no p
  * smoothly without lagging behind real device movement.
  * Road-snapped coordinates (snappedLat/Lng from server) should be passed when available.
  */
-export function updateBusPosition(lng: number, lat: number, speed: number, busId: string) {
+export function updateBusPosition(lng: number, lat: number, speed: number, busId: string, heading?: number | null) {
   if (!_mapInstance) return;
   const source = _mapInstance.getSource('live-bus-source') as mapboxgl.GeoJSONSource | undefined;
   if (!source) return;
@@ -81,7 +82,7 @@ export function updateBusPosition(lng: number, lat: number, speed: number, busId
     source.setData({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [iLng, iLat] },
-      properties: { speed, busId, lastUpdated: _lastUpdated },
+      properties: { speed, busId, lastUpdated: _lastUpdated, heading: heading ?? 0 },
     });
 
     if (t < 1) {
@@ -360,58 +361,71 @@ export default function BusMap({
       map.on('mouseenter', 'bus-stops-circle', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'bus-stops-circle', () => { map.getCanvas().style.cursor = ''; });
 
-      // ── Live bus GeoJSON source + circle layer ─────────────────────────
+      // ── Live bus GeoJSON source + bus-icon layer ────────────────────────
       map.addSource('live-bus-source', {
         type: 'geojson',
         data: {
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [HUBLI_CENTER.lng, HUBLI_CENTER.lat] },
-          properties: { speed: 0, busId: '', lastUpdated: '' },
+          properties: { speed: 0, busId: '', lastUpdated: '', heading: 0 },
         },
       });
-      // Outer pulse ring — hidden until a real driver location arrives
+      // Soft halo behind the icon so it still reads as "live" against any basemap colour
       map.addLayer({
         id: 'live-bus-pulse',
         type: 'circle',
         source: 'live-bus-source',
         layout: { visibility: 'none' },
         paint: {
-          'circle-radius': 20,
-          'circle-color': '#ef4444',
-          'circle-opacity': 0.25,
+          'circle-radius': 16,
+          'circle-color': '#f59e0b',
+          'circle-opacity': 0.22,
           'circle-stroke-width': 0,
         },
       });
-      // Main bus dot — hidden until a real driver location arrives
-      map.addLayer({
-        id: 'live-bus-layer',
-        type: 'circle',
-        source: 'live-bus-source',
-        layout: { visibility: 'none' },
-        paint: {
-          'circle-radius': 10,
-          'circle-color': '#ef4444',
-          'circle-stroke-width': 3,
-          'circle-stroke-color': '#ffffff',
-        },
-      });
+      // Bus icon marker — hidden until a real driver location arrives.
+      // Loaded async since the sprite has to be fetched before it can be used by the layer.
+      map.loadImage(busMarkerIcon, (error, image) => {
+        if (error || !image) {
+          console.error('Failed to load bus marker icon', error);
+          return;
+        }
+        if (!map.hasImage('bus-icon')) {
+          map.addImage('bus-icon', image, { pixelRatio: 2 });
+        }
+        map.addLayer({
+          id: 'live-bus-layer',
+          type: 'symbol',
+          source: 'live-bus-source',
+          layout: {
+            visibility: 'none',
+            'icon-image': 'bus-icon',
+            'icon-size': 0.16,
+            'icon-rotate': ['get', 'heading'],
+            'icon-rotation-alignment': 'map',
+            'icon-pitch-alignment': 'map',
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+          },
+        });
 
-      // ── Click popup on bus layer ───────────────────────────────────────
-      map.on('click', 'live-bus-layer', (e) => {
-        if (!e.features || e.features.length === 0) return;
-        const props = e.features[0].properties as Record<string, string | number>;
-        new mapboxgl.Popup({ className: 'nextstop-popup' })
-          .setLngLat(e.lngLat)
-          .setHTML(`
-            <p style="font-weight:700;margin:0 0 6px">🚌 Live Bus</p>
-            <p style="font-size:12px;margin:0 0 3px"><strong>Bus ID:</strong> ${props?.busId || 'N/A'}</p>
-            <p style="font-size:12px;margin:0 0 3px"><strong>Speed:</strong> ${props?.speed ?? 0} km/h</p>
-            <p style="font-size:12px;margin:0"><strong>Last Updated:</strong> ${props?.lastUpdated || '—'}</p>
-          `)
-          .addTo(map);
+        // ── Click popup on bus layer — attached once the layer actually exists ──
+        map.on('click', 'live-bus-layer', (e) => {
+          if (!e.features || e.features.length === 0) return;
+          const props = e.features[0].properties as Record<string, string | number>;
+          new mapboxgl.Popup({ className: 'nextstop-popup' })
+            .setLngLat(e.lngLat)
+            .setHTML(`
+              <p style="font-weight:700;margin:0 0 6px">🚌 Live Bus</p>
+              <p style="font-size:12px;margin:0 0 3px"><strong>Bus ID:</strong> ${props?.busId || 'N/A'}</p>
+              <p style="font-size:12px;margin:0 0 3px"><strong>Speed:</strong> ${props?.speed ?? 0} km/h</p>
+              <p style="font-size:12px;margin:0"><strong>Last Updated:</strong> ${props?.lastUpdated || '—'}</p>
+            `)
+            .addTo(map);
+        });
+        map.on('mouseenter', 'live-bus-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', 'live-bus-layer', () => { map.getCanvas().style.cursor = ''; });
       });
-      map.on('mouseenter', 'live-bus-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'live-bus-layer', () => { map.getCanvas().style.cursor = ''; });
 
       // Pre-warm the Directions API cache for all routes in the background
       prefetchAllRoutes();
@@ -539,7 +553,7 @@ export default function BusMap({
     // updateBusPosition already pans the camera to the new fix (timed to match
     // the real interval between fixes) — a second, independently-timed easeTo here
     // would fight it and make the camera jerk instead of glide.
-    updateBusPosition(dispLng, dispLat, loc.speed ?? 0, loc.busId ?? 'BUS-01');
+    updateBusPosition(dispLng, dispLat, loc.speed ?? 0, loc.busId ?? 'BUS-01', loc.heading);
 
     if (routeData) updateStopETAs({ ...loc, lat: dispLat, lng: dispLng }, routeData.stops);
   }, [locations, routeData, updateStopETAs, role]);
