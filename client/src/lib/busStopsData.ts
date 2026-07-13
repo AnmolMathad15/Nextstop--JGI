@@ -1,0 +1,109 @@
+/**
+ * Bus stop GeoJSON data sourced from jgi_bus_stops.geojson.
+ * Each feature has: label_text ("BusstopJgi - <name>") and color (matching its route).
+ */
+
+export type StopFeature = {
+  type: 'Feature';
+  properties: { label_text: string; color: string };
+  geometry: { type: 'Point'; coordinates: [number, number] };
+};
+
+export const BUS_STOPS_GEOJSON: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [
+    // ── Route 1: Keshwapur (#FF6D00) ─────────────────────────────────────────
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Shakti Colony (JK School)', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.1421, 15.3512] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sub Jail', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.141, 15.353] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Lamington School', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.1395, 15.355] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Venkatesh Colony', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.138, 15.358] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Madura Colony', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.136, 15.361] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Keshwapur Circle', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.1402, 15.354] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Old Bus Stand', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.141, 15.356] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Arts College', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.13, 15.36] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - BVB College', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.122, 15.368] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Unkal Cross', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.115, 15.375] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sai Nagar', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.1215, 15.3885] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JCET College', color: '#FF6D00' }, geometry: { type: 'Point', coordinates: [75.1234, 15.39] } },
+
+    // ── Route 2: PG Route (#AEEA00) ───────────────────────────────────────────
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Tolankeri', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.104803, 15.359245] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Petrol Pump IDBI', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.109503, 15.36028] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - PG', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.11284, 15.360809] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Siddeshwar Park', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.115336, 15.361428] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Lingaraj Nagar', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.113774, 15.364896] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Adarsh College', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.112753, 15.372129] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Siddappa Ajja Temple Lake', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.119, 15.385] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - President Hotel', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.113235, 15.381945] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sai Nagar', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.1178, 15.382508] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JCET College', color: '#AEEA00' }, geometry: { type: 'Point', coordinates: [75.119984, 15.394207] } },
+
+    // ── Route 3: Siddharoodh Math (#D50000) ──────────────────────────────────
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Nehru Nagar Water Tank', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.097832, 15.352331] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Manjunath Nagar', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.102208, 15.351665] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Anand Nagar', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.106884, 15.341191] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Siddharoodh Math', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.121338, 15.335785] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Muradeshwar Ceramics', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.118267, 15.341502] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Green Field', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.112072, 15.346944] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Akshay Park Petrol Bunk', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.109608, 15.350946] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Ravi Nagar', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.125, 15.358] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Tolankeri', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.104803, 15.359245] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Petrol Pump IDBI', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.109503, 15.36028] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - PG', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.11284, 15.360809] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Siddeshwar Park', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.115336, 15.361428] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Lingaraj Nagar', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.113774, 15.364896] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Adarsh College', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.112753, 15.372129] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Siddappa Ajja Temple Lake', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.119, 15.385] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - President Hotel', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.113235, 15.381945] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sai Nagar', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.1178, 15.382508] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JCET College', color: '#D50000' }, geometry: { type: 'Point', coordinates: [75.119984, 15.394207] } },
+
+    // ── Route 4: Gadag Road (#D500F9) ────────────────────────────────────────
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Head Post Office', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.145, 15.352] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Corporation', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.143, 15.354] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Old Bus Stand', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.141, 15.356] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Canara Hotel Hosur Circle', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.138, 15.358] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - KMC Stop', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.135, 15.36] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Gurudatta Bhavan', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.132, 15.362] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Arts College', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.13, 15.364] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - BVB College', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.122, 15.368] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Unkal Cross', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.115, 15.375] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Siddappa Ajja Temple old', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.119, 15.385] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sai Nagar', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.1215, 15.3885] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JCET College', color: '#D500F9' }, geometry: { type: 'Point', coordinates: [75.1234, 15.39] } },
+
+    // ── Route 5: Dharwad (#2962FF) ────────────────────────────────────────────
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sarvamanagala Cross, Dharwad', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75, 15.46] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Saptapur Bavi', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.005, 15.458] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Dasanakoppa Circle', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.01, 15.455] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Jubilee Circle', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.015, 15.45] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Court Circle', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.018, 15.448] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - NTTF', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.02, 15.445] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Toll Naka', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.025, 15.44] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JSS College', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.03, 15.435] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Gandhi Nagar', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.035, 15.43] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - SDM Dental College', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.045, 15.42] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Rayapur RTO', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.055, 15.41] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Navanagar', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.0848824, 15.3957011] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - APMC', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.093449, 15.393449] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Bhiridevarakoppa', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.1061771, 15.3867454] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - President Hotel', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.1133745, 15.3819925] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sai Nagar', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.1178, 15.382647] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Railway Track', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.1184117, 15.3861338] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JCET College', color: '#2962FF' }, geometry: { type: 'Point', coordinates: [75.1199687, 15.3941731] } },
+
+    // ── Route 6: Navanagar (#00E5FF) ─────────────────────────────────────────
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Navanagar', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.0848824, 15.3957011] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - APMC', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.093449, 15.393449] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Bhiridevarakoppa', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.1061771, 15.3867454] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - President Hotel', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.1133745, 15.3819925] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Sai Nagar', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.1178, 15.382647] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - Railway Track', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.1184117, 15.3861338] } },
+    { type: 'Feature', properties: { label_text: 'BusstopJgi - JCET College', color: '#00E5FF' }, geometry: { type: 'Point', coordinates: [75.1199687, 15.3941731] } },
+  ] as GeoJSON.Feature[],
+};
+
+/** Strip the "BusstopJgi - " prefix to get the plain stop name. */
+export function parseStopName(labelText: string): string {
+  return labelText.replace(/^BusstopJgi\s*-\s*/i, '').trim();
+}

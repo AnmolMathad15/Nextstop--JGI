@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
-import { ROUTE_GEOMETRY } from "@/lib/routeGeometry";
+import { ROUTE_GEOMETRY, ROUTE_GEOJSON_COLOR, ALL_ROUTES_GEOJSON } from "@/lib/routeGeometry";
+import { BUS_STOPS_GEOJSON, parseStopName } from "@/lib/busStopsData";
 import jgiLogo from "@/assets/jgi-logo.png";
 
 // ── Mapbox token ───────────────────────────────────────────────────────────────
@@ -141,8 +142,9 @@ export default function BusMap({
 }: BusMapProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const mapRef         = useRef<mapboxgl.Map | null>(null);
-  const stopMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const stopMarkersRef = useRef<mapboxgl.Marker[]>([]); // kept for cleanup safety
   const stopItemsRef   = useRef<Map<number, HTMLDivElement>>(new Map());
+  const routeDataRef   = useRef<RouteWithStops | null>(null);
 
   const [sheetOpen,    setSheetOpen]    = useState(false);
   const [stopSearch,   setStopSearch]   = useState("");
@@ -207,32 +209,117 @@ export default function BusMap({
         )
         .addTo(map);
 
-      // ── Route line source (populated when route loads) ─────────────────
+      // ── All routes — dim background (all 6 routes always visible) ────
+      map.addSource('all-routes', {
+        type: 'geojson',
+        data: ALL_ROUTES_GEOJSON,
+      });
+      map.addLayer({
+        id: 'all-routes-line',
+        type: 'line',
+        source: 'all-routes',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 2,
+          'line-opacity': 0.22,
+        },
+      });
+
+      // ── Active route line (updated when user selects a route) ─────────
       map.addSource('bus-route', {
         type: 'geojson',
-        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] }, properties: {} },
+        data: { type: 'FeatureCollection', features: [] },
       });
       map.addLayer({
         id: 'bus-route-shadow',
         type: 'line',
         source: 'bus-route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#3b82f6', 'line-width': 12, 'line-opacity': 0.1, 'line-blur': 5 },
+        paint: { 'line-color': '#3b82f6', 'line-width': 14, 'line-opacity': 0.12, 'line-blur': 6 },
       });
       map.addLayer({
         id: 'bus-route-line',
         type: 'line',
         source: 'bus-route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#3b82f6', 'line-width': 5, 'line-opacity': 0.9 },
+        paint: { 'line-color': '#3b82f6', 'line-width': 5, 'line-opacity': 0.95 },
       });
       map.addLayer({
         id: 'bus-route-dash',
         type: 'line',
         source: 'bus-route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3, 'line-dasharray': [4, 8] },
+        paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.35, 'line-dasharray': [4, 8] },
       });
+
+      // ── Bus stops from GeoJSON (circle + label layers) ─────────────────
+      map.addSource('bus-stops', {
+        type: 'geojson',
+        data: BUS_STOPS_GEOJSON,
+      });
+      // Invisible until a route is selected (filter matches nothing initially)
+      map.addLayer({
+        id: 'bus-stops-circle',
+        type: 'circle',
+        source: 'bus-stops',
+        filter: ['==', ['get', 'color'], '__none__'],
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 15, 8],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+          'circle-opacity': 0.95,
+        },
+      });
+      map.addLayer({
+        id: 'bus-stops-label',
+        type: 'symbol',
+        source: 'bus-stops',
+        filter: ['==', ['get', 'color'], '__none__'],
+        layout: {
+          // Strip "BusstopJgi - " prefix (13 chars) for clean label
+          'text-field': ['slice', ['get', 'label_text'], 13],
+          'text-size': 11,
+          'text-offset': [0, 1.3],
+          'text-anchor': 'top',
+          'text-optional': true,
+          'text-max-width': 9,
+          'text-allow-overlap': false,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1.5,
+        },
+      });
+
+      // ── Stop click → open sheet and fly to stop ─────────────────────
+      map.on('click', 'bus-stops-circle', (e) => {
+        if (!e.features?.length) return;
+        const props = e.features[0].properties as Record<string, string>;
+        const stopName = parseStopName(props.label_text);
+        const dbStop = routeDataRef.current?.stops.find(
+          s => s.name.toLowerCase() === stopName.toLowerCase()
+        );
+        map.flyTo({ center: e.lngLat, zoom: 16, duration: 800 });
+        if (dbStop) {
+          setActiveStopId(dbStop.id);
+          setSheetOpen(true);
+          setTimeout(() => {
+            stopItemsRef.current.get(dbStop.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 300);
+        }
+        new mapboxgl.Popup({ closeButton: false, offset: 12, className: 'nextstop-popup' })
+          .setLngLat(e.lngLat)
+          .setHTML(
+            `<p style="font-weight:600;margin:0 0 3px">${stopName}</p>
+             <p style="font-size:11px;color:#6b7280;margin:0">📍 Bus Stop</p>`
+          )
+          .addTo(map);
+      });
+      map.on('mouseenter', 'bus-stops-circle', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'bus-stops-circle', () => { map.getCanvas().style.cursor = ''; });
 
       // ── Live bus GeoJSON source + circle layer ─────────────────────────
       map.addSource('live-bus-source', {
@@ -307,101 +394,60 @@ export default function BusMap({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Keep routeDataRef in sync for use inside map event handlers ───────────
+  useEffect(() => {
+    routeDataRef.current = routeData ?? null;
+  }, [routeData]);
+
   // ── Route rendering ────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || !routeData) return;
 
-    // Clear old stop markers
+    // Remove any legacy DOM markers
     stopMarkersRef.current.forEach(m => m.remove());
     stopMarkersRef.current = [];
-    stopItemsRef.current.clear();
 
     const stops = [...routeData.stops].sort((a, b) => a.sequence - b.sequence);
 
-    // ── Update route polyline ──────────────────────────────────────────
-    // Prefer GeoJSON road-following geometry; fall back to stop-to-stop if unavailable.
+    // ── Update active-route polyline from GeoJSON coordinates ─────────
     const coords: [number, number][] =
       ROUTE_GEOMETRY[routeData.id] ?? stops.map(s => [s.lng, s.lat] as [number, number]);
     const src = map.getSource('bus-route') as mapboxgl.GeoJSONSource | undefined;
     if (src) {
       src.setData({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: coords },
-        properties: {},
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: coords },
+          properties: {},
+        }],
       });
     }
 
-    // ── Apply route-specific colour to line layers ─────────────────────
-    const routeColor = routeData.color || '#3b82f6';
-    if (map.getLayer('bus-route-shadow')) {
-      map.setPaintProperty('bus-route-shadow', 'line-color', routeColor);
-    }
-    if (map.getLayer('bus-route-line')) {
-      map.setPaintProperty('bus-route-line', 'line-color', routeColor);
-    }
+    // ── Route colour from GeoJSON palette ─────────────────────────────
+    const geojsonColor = ROUTE_GEOJSON_COLOR[routeData.id] ?? routeData.color ?? '#3b82f6';
+    if (map.getLayer('bus-route-shadow')) map.setPaintProperty('bus-route-shadow', 'line-color', geojsonColor);
+    if (map.getLayer('bus-route-line'))   map.setPaintProperty('bus-route-line',   'line-color', geojsonColor);
 
-    // ── Stop markers ──────────────────────────────────────────────────
-    stops.forEach((stop, idx) => {
-      const main   = isMain(stop, idx, stops.length);
-      const isLast = idx === stops.length - 1;
+    // ── Show only this route's stops via Mapbox filter ────────────────
+    const stopFilter: mapboxgl.FilterSpecification = ['==', ['get', 'color'], geojsonColor];
+    if (map.getLayer('bus-stops-circle')) map.setFilter('bus-stops-circle', stopFilter);
+    if (map.getLayer('bus-stops-label'))  map.setFilter('bus-stops-label',  stopFilter);
 
-      const el = document.createElement('div');
-      el.className = isLast
-        ? 'nextstop-stop-destination'
-        : main
-          ? 'nextstop-stop-main'
-          : 'nextstop-stop-sub';
-      if (isLast) el.textContent = '🏫';
-      el.title = stop.name;
-
-      el.addEventListener('click', () => {
-        setActiveStopId(stop.id);
-        setSheetOpen(true);
-        map.flyTo({ center: [stop.lng, stop.lat], zoom: 16, duration: 800 });
-        setTimeout(() => {
-          stopItemsRef.current.get(stop.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 300);
-      });
-
-      const popup = new mapboxgl.Popup({
-        closeButton: false,
-        offset: main ? 14 : 9,
-        className: 'nextstop-popup',
-      }).setHTML(
-        `<p style="font-weight:600;margin:0 0 3px">${stop.name}</p>
-         <p style="font-size:11px;color:#6b7280;margin:0">⏰ ${stop.scheduledTime}${stop.time1015am ? ` / ${stop.time1015am}` : ''}</p>`
+    // ── Fit viewport to route geometry ────────────────────────────────
+    if (coords.length > 1) {
+      const bounds = coords.reduce(
+        (b, c) => b.extend(c as [number, number]),
+        new mapboxgl.LngLatBounds(coords[0], coords[0])
       );
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([stop.lng, stop.lat])
-        .setPopup(popup)
-        .addTo(map);
-
-      stopMarkersRef.current.push(marker);
-    });
-
-    // ── Fit viewport to route (after map is loaded, not during init) ──
-    if (stops.length > 1) {
-      const bounds = new mapboxgl.LngLatBounds();
-      stops.forEach(s => bounds.extend([s.lng, s.lat]));
       map.fitBounds(bounds, {
         padding: { top: 80, bottom: 230, left: 60, right: 60 },
-        maxZoom: 15,
+        maxZoom: 14,
         duration: 1200,
       });
     }
   }, [routeData, mapLoaded]);
-
-  // ── Active stop highlight ──────────────────────────────────────────────────
-  useEffect(() => {
-    stopMarkersRef.current.forEach(m => m.getElement().classList.remove('active'));
-    if (activeStopId !== null) {
-      const sorted = (routeData?.stops ?? []).sort((a, b) => a.sequence - b.sequence);
-      const idx = sorted.findIndex(s => s.id === activeStopId);
-      if (idx >= 0) stopMarkersRef.current[idx]?.getElement().classList.add('active');
-    }
-  }, [activeStopId, routeData]);
 
   // ── ETA computation ────────────────────────────────────────────────────────
   const updateStopETAs = useCallback(

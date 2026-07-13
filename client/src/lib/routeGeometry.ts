@@ -1,25 +1,19 @@
 /**
  * GeoJSON-sourced route paths for each bus route.
  * Keyed by route database ID (1-6).
- * These coordinates define the actual road path the route follows on the map.
  */
 export const ROUTE_GEOMETRY: Record<number, [number, number][]> = {
-  // 1 – Keshwapur Route
   1: [
     [75.1421, 15.3512], [75.1410, 15.3530], [75.1395, 15.3550], [75.1380, 15.3580],
     [75.1360, 15.3610], [75.1402, 15.3540], [75.1410, 15.3560], [75.1300, 15.3600],
     [75.1220, 15.3680], [75.1150, 15.3750], [75.1215, 15.3885], [75.1234, 15.3900],
   ],
-
-  // 2 – PG Route (Tolankeri Onwards)
   2: [
     [75.104803, 15.359245], [75.109503, 15.360280], [75.11284, 15.360809],
     [75.115336, 15.361428], [75.113774, 15.364896], [75.112753, 15.372129],
     [75.1190, 15.3850], [75.113235, 15.381945], [75.1178, 15.382508],
     [75.119984, 15.394207],
   ],
-
-  // 3 – Siddharoodh Math Route
   3: [
     [75.097832, 15.352331], [75.102208, 15.351665], [75.106884, 15.341191],
     [75.121338, 15.335785], [75.118267, 15.341502], [75.112072, 15.346944],
@@ -29,15 +23,11 @@ export const ROUTE_GEOMETRY: Record<number, [number, number][]> = {
     [75.1190, 15.3850], [75.113235, 15.381945], [75.1178, 15.382508],
     [75.119984, 15.394207],
   ],
-
-  // 4 – Gadag Road Route
   4: [
     [75.1450, 15.3520], [75.1430, 15.3540], [75.1410, 15.3560], [75.1380, 15.3580],
     [75.1350, 15.3600], [75.1320, 15.3620], [75.1300, 15.3640], [75.1220, 15.3680],
     [75.1150, 15.3750], [75.1190, 15.3850], [75.1215, 15.3885], [75.1234, 15.3900],
   ],
-
-  // 5 – Dharwad Route
   5: [
     [75.0000, 15.4600], [75.0050, 15.4580], [75.0100, 15.4550], [75.0150, 15.4500],
     [75.0180, 15.4480], [75.0200, 15.4450], [75.0250, 15.4400], [75.0300, 15.4350],
@@ -46,11 +36,29 @@ export const ROUTE_GEOMETRY: Record<number, [number, number][]> = {
     [75.1133745, 15.3819925], [75.1178, 15.382647], [75.1184117, 15.3861338],
     [75.1199687, 15.3941731],
   ],
-
-  // 6 – Navanagar Route
   6: [
     [75.0848824, 15.3957011], [75.093449, 15.393449], [75.1061771, 15.3867454],
     [75.1133745, 15.3819925], [75.1178, 15.382647], [75.1184117, 15.3861338],
     [75.1199687, 15.3941731],
   ],
+};
+
+/** GeoJSON color for each route (matches the uploaded GeoJSON). */
+export const ROUTE_GEOJSON_COLOR: Record<number, string> = {
+  1: '#FF6D00',
+  2: '#AEEA00',
+  3: '#D50000',
+  4: '#D500F9',
+  5: '#2962FF',
+  6: '#00E5FF',
+};
+
+/** All routes as a GeoJSON FeatureCollection — used for the dim background layer. */
+export const ALL_ROUTES_GEOJSON: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: Object.entries(ROUTE_GEOMETRY).map(([id, coords]) => ({
+    type: 'Feature' as const,
+    properties: { routeId: Number(id), color: ROUTE_GEOJSON_COLOR[Number(id)] },
+    geometry: { type: 'LineString' as const, coordinates: coords },
+  })),
 };
