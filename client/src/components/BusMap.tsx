@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
+import { ROUTE_GEOMETRY } from "@/lib/routeGeometry";
 import jgiLogo from "@/assets/jgi-logo.png";
 
 // ── Mapbox token ───────────────────────────────────────────────────────────────
@@ -319,7 +320,9 @@ export default function BusMap({
     const stops = [...routeData.stops].sort((a, b) => a.sequence - b.sequence);
 
     // ── Update route polyline ──────────────────────────────────────────
-    const coords = stops.map(s => [s.lng, s.lat]);
+    // Prefer GeoJSON road-following geometry; fall back to stop-to-stop if unavailable.
+    const coords: [number, number][] =
+      ROUTE_GEOMETRY[routeData.id] ?? stops.map(s => [s.lng, s.lat] as [number, number]);
     const src = map.getSource('bus-route') as mapboxgl.GeoJSONSource | undefined;
     if (src) {
       src.setData({
