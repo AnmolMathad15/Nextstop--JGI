@@ -23,7 +23,6 @@ mapboxgl.accessToken = MAPBOX_TOKEN;
 // ── Module-level map reference (for exported updateBusPosition) ────────────────
 let _mapInstance: mapboxgl.Map | null = null;
 let _lastUpdated = '';
-let _simInterval: ReturnType<typeof setInterval> | null = null;
 
 // Animation state for smooth bus position interpolation
 let _animFrameId: number | null = null;
@@ -83,28 +82,6 @@ export function updateBusPosition(lng: number, lat: number, speed: number, busId
 
   // Smooth camera follow — easeTo is non-jarring, longer than panTo
   _mapInstance.easeTo({ center: [lng, lat], duration: 2000, essential: false });
-}
-
-/** Auto-simulated tracking — runs once on map load to verify render + animation. */
-function startSimulatedTracking() {
-  if (_simInterval) clearInterval(_simInterval);
-  const path: [number, number][] = [
-    [75.1240, 15.3647],
-    [75.1260, 15.3660],
-    [75.1280, 15.3675],
-    [75.1300, 15.3690],
-    [75.1320, 15.3710],
-    [75.1300, 15.3690],
-    [75.1280, 15.3675],
-    [75.1260, 15.3660],
-  ];
-  let idx = 0;
-  _simInterval = setInterval(() => {
-    const [lng, lat] = path[idx % path.length];
-    updateBusPosition(lng, lat, 30 + Math.round(Math.random() * 20), 'BUS-SIM-01');
-    console.log('Simulating GPS Telemetry Update...', { lng, lat, idx });
-    idx++;
-  }, 3000);
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -377,11 +354,12 @@ export default function BusMap({
           properties: { speed: 0, busId: '', lastUpdated: '' },
         },
       });
-      // Outer pulse ring
+      // Outer pulse ring — hidden until a real driver location arrives
       map.addLayer({
         id: 'live-bus-pulse',
         type: 'circle',
         source: 'live-bus-source',
+        layout: { visibility: 'none' },
         paint: {
           'circle-radius': 20,
           'circle-color': '#ef4444',
@@ -389,11 +367,12 @@ export default function BusMap({
           'circle-stroke-width': 0,
         },
       });
-      // Main bus dot
+      // Main bus dot — hidden until a real driver location arrives
       map.addLayer({
         id: 'live-bus-layer',
         type: 'circle',
         source: 'live-bus-source',
+        layout: { visibility: 'none' },
         paint: {
           'circle-radius': 10,
           'circle-color': '#ef4444',
@@ -419,9 +398,6 @@ export default function BusMap({
       map.on('mouseenter', 'live-bus-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'live-bus-layer', () => { map.getCanvas().style.cursor = ''; });
 
-      // ── Start simulated tracking to confirm render ─────────────────────
-      startSimulatedTracking();
-
       // Pre-warm the Directions API cache for all routes in the background
       prefetchAllRoutes();
 
@@ -437,7 +413,6 @@ export default function BusMap({
 
     return () => {
       window.removeEventListener('resize', onResize);
-      if (_simInterval) { clearInterval(_simInterval); _simInterval = null; }
       map.remove();
       mapRef.current = null;
       _mapInstance = null;
@@ -524,9 +499,16 @@ export default function BusMap({
     [selectedStopData]
   );
 
-  // ── Live location handler ──────────────────────────────────────────────────
+  // ── Live location handler — driven only by real driver GPS over the WebSocket ──
   useEffect(() => {
-    if (locations.length === 0) return;
+    const map = mapRef.current;
+
+    if (locations.length === 0) {
+      // No driver currently sharing location — keep the bus marker hidden
+      if (map?.getLayer('live-bus-layer')) map.setLayoutProperty('live-bus-layer', 'visibility', 'none');
+      if (map?.getLayer('live-bus-pulse')) map.setLayoutProperty('live-bus-pulse', 'visibility', 'none');
+      return;
+    }
 
     const loc = locations[0] as LiveLocation;
     setIsOffline(loc.driverOnline === false);
@@ -536,8 +518,8 @@ export default function BusMap({
     const dispLat = loc.snappedLat ?? loc.lat;
     const dispLng = loc.snappedLng ?? loc.lng;
 
-    // Stop the simulation once real data arrives
-    if (_simInterval) { clearInterval(_simInterval); _simInterval = null; }
+    if (map?.getLayer('live-bus-layer')) map.setLayoutProperty('live-bus-layer', 'visibility', 'visible');
+    if (map?.getLayer('live-bus-pulse')) map.setLayoutProperty('live-bus-pulse', 'visibility', 'visible');
 
     updateBusPosition(dispLng, dispLat, loc.speed ?? 0, loc.busId ?? 'BUS-01');
 
