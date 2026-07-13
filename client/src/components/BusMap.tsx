@@ -334,22 +334,65 @@ export default function BusMap({
         },
       });
 
-      // ── Stop click → open sheet and fly to stop ─────────────────────
-      map.on('click', 'bus-stops-circle', (e) => {
+      // ── DB-backed stop source — populated per route from API data ──────
+      // This is the single source of truth for stop positions. Each feature
+      // embeds stopId so map→list sync uses stop.id, not array index or name.
+      map.addSource('active-stops-db', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'active-stops-circle',
+        type: 'circle',
+        source: 'active-stops-db',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 4, 15, 8],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+          'circle-opacity': 0.95,
+        },
+      });
+      map.addLayer({
+        id: 'active-stops-label',
+        type: 'symbol',
+        source: 'active-stops-db',
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-size': 11,
+          'text-offset': [0, 1.3],
+          'text-anchor': 'top',
+          'text-optional': true,
+          'text-max-width': 9,
+          'text-allow-overlap': false,
+        },
+        paint: {
+          'text-color': '#111827',
+          'text-halo-color': '#ffffff',
+          'text-halo-width': 1.5,
+        },
+      });
+
+      // ── Map → List sync: click a stop marker → select by stopId ────────────
+      // Uses stopId embedded in feature properties — no name matching, no index.
+      map.on('click', 'active-stops-circle', (e) => {
         if (!e.features?.length) return;
-        const props = e.features[0].properties as Record<string, string>;
-        const stopName = parseStopName(props.label_text);
-        const dbStop = routeDataRef.current?.stops.find(
-          s => s.name.toLowerCase() === stopName.toLowerCase()
-        );
+        const props = e.features[0].properties as Record<string, string | number>;
+        const stopId = Number(props.stopId);
+        const stopName = String(props.name);
+
+        console.log('[BusMap] Map marker clicked — stopId:', stopId, 'name:', stopName, 'coords:', e.lngLat);
+
+        // Fly to exact GeoJSON feature position (same coords stored in DB)
         map.flyTo({ center: e.lngLat, zoom: 16, duration: 800 });
-        if (dbStop) {
-          setActiveStopId(dbStop.id);
-          setSheetOpen(true);
-          setTimeout(() => {
-            stopItemsRef.current.get(dbStop.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 300);
-        }
+
+        // Update selected stop state by ID — drives list highlight + scroll
+        setActiveStopId(stopId);
+        setSheetOpen(true);
+        setTimeout(() => {
+          stopItemsRef.current.get(stopId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+
         new mapboxgl.Popup({ closeButton: false, offset: 12, className: 'nextstop-popup' })
           .setLngLat(e.lngLat)
           .setHTML(
@@ -358,8 +401,8 @@ export default function BusMap({
           )
           .addTo(map);
       });
-      map.on('mouseenter', 'bus-stops-circle', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'bus-stops-circle', () => { map.getCanvas().style.cursor = ''; });
+      map.on('mouseenter', 'active-stops-circle', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'active-stops-circle', () => { map.getCanvas().style.cursor = ''; });
 
       // ── Live bus GeoJSON source + bus-icon layer ────────────────────────
       map.addSource('live-bus-source', {
@@ -464,12 +507,32 @@ export default function BusMap({
 
     const geojsonColor = ROUTE_GEOJSON_COLOR[routeData.id] ?? routeData.color ?? '#3b82f6';
 
-    // Apply route colour and stop filter immediately (before async fetch)
+    // Apply route colour to the active route line
     if (map.getLayer('bus-route-shadow')) map.setPaintProperty('bus-route-shadow', 'line-color', geojsonColor);
     if (map.getLayer('bus-route-line'))   map.setPaintProperty('bus-route-line',   'line-color', geojsonColor);
-    const stopFilter: mapboxgl.FilterSpecification = ['==', ['get', 'color'], geojsonColor];
-    if (map.getLayer('bus-stops-circle')) map.setFilter('bus-stops-circle', stopFilter);
-    if (map.getLayer('bus-stops-label'))  map.setFilter('bus-stops-label',  stopFilter);
+
+    // Keep the static GeoJSON stop layers hidden — they lack stopId so cannot
+    // be used for reliable ID-based sync. The active-stops-db layer below
+    // replaces them with DB-authoritative coordinates and embedded stopId.
+    if (map.getLayer('bus-stops-circle')) map.setFilter('bus-stops-circle', ['==', ['get', 'color'], '__none__']);
+    if (map.getLayer('bus-stops-label'))  map.setFilter('bus-stops-label',  ['==', ['get', 'color'], '__none__']);
+
+    // ── Populate active-stops-db from the DB route data ───────────────────────
+    // Single source of truth: both map markers and the stop list use stop.lat/lng
+    // from the API. Each GeoJSON feature gets stopId embedded so map clicks
+    // can select by ID without any name matching or index lookup.
+    const dbStopsSrc = map.getSource('active-stops-db') as mapboxgl.GeoJSONSource | undefined;
+    if (dbStopsSrc) {
+      dbStopsSrc.setData({
+        type: 'FeatureCollection',
+        features: routeData.stops.map(stop => ({
+          type: 'Feature' as const,
+          properties: { stopId: stop.id, name: stop.name, color: geojsonColor },
+          geometry: { type: 'Point' as const, coordinates: [stop.lng, stop.lat] },
+        })),
+      });
+      console.log('[BusMap] active-stops-db populated —', routeData.stops.length, 'stops for route', routeData.id);
+    }
 
     // ── Fetch road-snapped geometry from Mapbox Directions API ────────
     let cancelled = false;
@@ -558,8 +621,12 @@ export default function BusMap({
     if (routeData) updateStopETAs({ ...loc, lat: dispLat, lng: dispLng }, routeData.stops);
   }, [locations, routeData, updateStopETAs, role]);
 
-  // ── Fly to stop ────────────────────────────────────────────────────────────
+  // ── List → Map sync: fly to exact DB coordinates, select by stop.id ─────────
+  // Uses stop.id as the single identifier — no array index, no name matching.
+  // The active-stops-db GeoJSON source is built from the same DB data, so
+  // stop.lng / stop.lat always match the rendered marker position exactly.
   const flyToStop = useCallback((stop: RouteStop) => {
+    console.log('[BusMap] List stop clicked — stopId:', stop.id, 'name:', stop.name, 'lat:', stop.lat, 'lng:', stop.lng);
     mapRef.current?.flyTo({ center: [stop.lng, stop.lat], zoom: 16, duration: 800 });
     setActiveStopId(stop.id);
     setSheetOpen(true);
