@@ -21,6 +21,7 @@ export const routes = pgTable("routes", {
   displayOrder: integer("display_order").default(0),
   isActive: boolean("is_active").default(true),
   speedLimit: integer("speed_limit").default(40), // km/h
+  color: text("color").default("#3b82f6"), // hex color for map polyline
 });
 
 export const routeStops = pgTable("route_stops", {
@@ -130,7 +131,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
   username: true, password: true, role: true, name: true, phone: true,
 });
 export const insertRouteSchema = createInsertSchema(routes).pick({
-  name: true, displayOrder: true, isActive: true, speedLimit: true,
+  name: true, displayOrder: true, isActive: true, speedLimit: true, color: true,
 });
 export const insertRouteStopSchema = createInsertSchema(routeStops).pick({
   routeId: true, name: true, lat: true, lng: true, scheduledTime: true,

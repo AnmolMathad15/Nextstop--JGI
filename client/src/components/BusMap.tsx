@@ -1,5 +1,5 @@
-import maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Search, Navigation, MapPin, Clock, Wifi, WifiOff, Bus, ChevronUp, ChevronDown, Signal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,54 @@ import { useQuery } from "@tanstack/react-query";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
 import jgiLogo from "@/assets/jgi-logo.png";
-import busIcon from "@/assets/bus-icon.jpeg";
+
+// ── Mapbox token ───────────────────────────────────────────────────────────────
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
+const CUSTOM_STYLE = import.meta.env.VITE_MAPBOX_STYLE as string;
+const FALLBACK_STYLE = 'mapbox://styles/mapbox/streets-v12';
+
+mapboxgl.accessToken = MAPBOX_TOKEN;
+
+// ── Module-level map reference (for exported updateBusPosition) ────────────────
+let _mapInstance: mapboxgl.Map | null = null;
+let _lastUpdated = '';
+let _simInterval: ReturnType<typeof setInterval> | null = null;
+
+/** High-performance bus position update — mutates GeoJSON source, no DOM recreation. */
+export function updateBusPosition(lng: number, lat: number, speed: number, busId: string) {
+  if (!_mapInstance) return;
+  const source = _mapInstance.getSource('live-bus-source') as mapboxgl.GeoJSONSource | undefined;
+  if (!source) return;
+  _lastUpdated = new Date().toLocaleTimeString();
+  source.setData({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [lng, lat] },
+    properties: { speed, busId, lastUpdated: _lastUpdated },
+  });
+  _mapInstance.panTo([lng, lat], { duration: 1000 });
+}
+
+/** Auto-simulated tracking — runs once on map load to verify render + animation. */
+function startSimulatedTracking() {
+  if (_simInterval) clearInterval(_simInterval);
+  const path: [number, number][] = [
+    [75.1240, 15.3647],
+    [75.1260, 15.3660],
+    [75.1280, 15.3675],
+    [75.1300, 15.3690],
+    [75.1320, 15.3710],
+    [75.1300, 15.3690],
+    [75.1280, 15.3675],
+    [75.1260, 15.3660],
+  ];
+  let idx = 0;
+  _simInterval = setInterval(() => {
+    const [lng, lat] = path[idx % path.length];
+    updateBusPosition(lng, lat, 30 + Math.round(Math.random() * 20), 'BUS-SIM-01');
+    console.log('Simulating GPS Telemetry Update...', { lng, lat, idx });
+    idx++;
+  }, 3000);
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +77,7 @@ interface RouteWithStops {
   name: string;
   displayOrder: number;
   isActive: boolean;
+  color?: string; // hex color for this route's polyline
   stops: RouteStop[];
 }
 
@@ -43,7 +91,7 @@ interface LiveLocation {
   heading?: number;
   accuracy?: number;
   driverOnline?: boolean;
-  snappedLat?: number; // road-matched position from server-side OSRM map matching
+  snappedLat?: number;
   snappedLng?: number;
   roadSnapped?: boolean;
 }
@@ -69,14 +117,6 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function calcBearing(from: [number, number], to: [number, number]): number {
-  const fLat = (from[1] * Math.PI) / 180, fLng = (from[0] * Math.PI) / 180;
-  const tLat = (to[1]   * Math.PI) / 180, tLng = (to[0]   * Math.PI) / 180;
-  const y = Math.sin(tLng - fLng) * Math.cos(tLat);
-  const x = Math.cos(fLat) * Math.sin(tLat) - Math.sin(fLat) * Math.cos(tLat) * Math.cos(tLng - fLng);
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-}
-
 function nearestStopIdx(loc: { lat: number; lng: number }, stops: RouteStop[]): number {
   let minD = Infinity, idx = 0;
   stops.forEach((s, i) => {
@@ -90,25 +130,6 @@ function isMain(stop: RouteStop, idx: number, total: number): boolean {
   return !!(stop.isMainStop) || idx === 0 || idx === total - 1 || idx % 3 === 0;
 }
 
-// CartoDB Positron — clean, minimal, desaturated base map
-const CARTO_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: {
-    carto: {
-      type: "raster",
-      tiles: [
-        "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-        "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-        "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-      ],
-      tileSize: 256,
-      attribution:
-        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
-    },
-  },
-  layers: [{ id: "carto-light", type: "raster", source: "carto" }],
-};
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function BusMap({
@@ -117,14 +138,10 @@ export default function BusMap({
   showAllBuses = false,
   role = "student",
 }: BusMapProps) {
-  const containerRef    = useRef<HTMLDivElement>(null);
-  const mapRef          = useRef<maplibregl.Map | null>(null);
-  const busMarkerRef    = useRef<maplibregl.Marker | null>(null);
-  const stopMarkersRef  = useRef<maplibregl.Marker[]>([]);
-  const animFrameRef    = useRef<number | null>(null);
-  const prevCoordsRef   = useRef<[number, number] | null>(null);
-  const offlineTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const stopItemsRef    = useRef<Map<number, HTMLDivElement>>(new Map());
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const mapRef         = useRef<mapboxgl.Map | null>(null);
+  const stopMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const stopItemsRef   = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const [sheetOpen,    setSheetOpen]    = useState(false);
   const [stopSearch,   setStopSearch]   = useState("");
@@ -153,48 +170,139 @@ export default function BusMap({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const map = new maplibregl.Map({
+    const map = new mapboxgl.Map({
       container: containerRef.current,
-      style: CARTO_STYLE,
-      center: [JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat],
-      zoom: 14,
+      style: CUSTOM_STYLE || FALLBACK_STYLE,
+      center: [HUBLI_CENTER.lng, HUBLI_CENTER.lat], // [75.1240, 15.3647]
+      zoom: 13,
+      pitch: 45,
       attributionControl: false,
     });
 
-    map.on("load", () => {
-      map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+    map.on('load', () => {
+      // MANDATORY: force canvas to recalculate dimensions after layout settles
+      map.resize();
+      console.log('Map loaded and canvas resized successfully!');
 
-      // ── JCET College pin (always visible) ──
-      const colEl = document.createElement("div");
-      colEl.className = "nextstop-college-marker";
-      const colImg = document.createElement("img");
+      map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+      // ── JCET College pin ───────────────────────────────────────────────
+      const colEl = document.createElement('div');
+      colEl.className = 'nextstop-college-marker';
+      const colImg = document.createElement('img');
       colImg.src = jgiLogo;
-      colImg.style.cssText = "width:100%;height:100%;object-fit:cover;border-radius:50%;";
+      colImg.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
       colEl.appendChild(colImg);
 
-      new maplibregl.Marker({ element: colEl, anchor: "center" })
+      new mapboxgl.Marker({ element: colEl, anchor: 'center' })
         .setLngLat([JCET_COLLEGE_COORDS.lng, JCET_COLLEGE_COORDS.lat])
         .setPopup(
-          new maplibregl.Popup({
-            closeButton: false,
-            offset: 28,
-            className: "nextstop-popup",
-          }).setHTML(
-            `<p style="font-weight:700;margin:0 0 3px">🏫 JCET College</p>
-             <p style="font-size:11px;color:#6b7280;margin:0">Jain College of Engineering &amp; Technology</p>`
-          )
+          new mapboxgl.Popup({ closeButton: false, offset: 28, className: 'nextstop-popup' })
+            .setHTML(
+              `<p style="font-weight:700;margin:0 0 3px">🏫 JCET College</p>
+               <p style="font-size:11px;color:#6b7280;margin:0">Jain College of Engineering &amp; Technology</p>`
+            )
         )
         .addTo(map);
+
+      // ── Route line source (populated when route loads) ─────────────────
+      map.addSource('bus-route', {
+        type: 'geojson',
+        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] }, properties: {} },
+      });
+      map.addLayer({
+        id: 'bus-route-shadow',
+        type: 'line',
+        source: 'bus-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#3b82f6', 'line-width': 12, 'line-opacity': 0.1, 'line-blur': 5 },
+      });
+      map.addLayer({
+        id: 'bus-route-line',
+        type: 'line',
+        source: 'bus-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#3b82f6', 'line-width': 5, 'line-opacity': 0.9 },
+      });
+      map.addLayer({
+        id: 'bus-route-dash',
+        type: 'line',
+        source: 'bus-route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3, 'line-dasharray': [4, 8] },
+      });
+
+      // ── Live bus GeoJSON source + circle layer ─────────────────────────
+      map.addSource('live-bus-source', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [HUBLI_CENTER.lng, HUBLI_CENTER.lat] },
+          properties: { speed: 0, busId: '', lastUpdated: '' },
+        },
+      });
+      // Outer pulse ring
+      map.addLayer({
+        id: 'live-bus-pulse',
+        type: 'circle',
+        source: 'live-bus-source',
+        paint: {
+          'circle-radius': 20,
+          'circle-color': '#ef4444',
+          'circle-opacity': 0.25,
+          'circle-stroke-width': 0,
+        },
+      });
+      // Main bus dot
+      map.addLayer({
+        id: 'live-bus-layer',
+        type: 'circle',
+        source: 'live-bus-source',
+        paint: {
+          'circle-radius': 10,
+          'circle-color': '#ef4444',
+          'circle-stroke-width': 3,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+
+      // ── Click popup on bus layer ───────────────────────────────────────
+      map.on('click', 'live-bus-layer', (e) => {
+        if (!e.features || e.features.length === 0) return;
+        const props = e.features[0].properties as Record<string, string | number>;
+        new mapboxgl.Popup({ className: 'nextstop-popup' })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <p style="font-weight:700;margin:0 0 6px">🚌 Live Bus</p>
+            <p style="font-size:12px;margin:0 0 3px"><strong>Bus ID:</strong> ${props?.busId || 'N/A'}</p>
+            <p style="font-size:12px;margin:0 0 3px"><strong>Speed:</strong> ${props?.speed ?? 0} km/h</p>
+            <p style="font-size:12px;margin:0"><strong>Last Updated:</strong> ${props?.lastUpdated || '—'}</p>
+          `)
+          .addTo(map);
+      });
+      map.on('mouseenter', 'live-bus-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'live-bus-layer', () => { map.getCanvas().style.cursor = ''; });
+
+      // ── Start simulated tracking to confirm render ─────────────────────
+      startSimulatedTracking();
 
       setMapLoaded(true);
     });
 
+    // Window resize → recalculate canvas
+    const onResize = () => map.resize();
+    window.addEventListener('resize', onResize);
+
     mapRef.current = map;
+    _mapInstance = map;
+
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+      window.removeEventListener('resize', onResize);
+      if (_simInterval) { clearInterval(_simInterval); _simInterval = null; }
       map.remove();
       mapRef.current = null;
+      _mapInstance = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -210,78 +318,59 @@ export default function BusMap({
 
     const stops = [...routeData.stops].sort((a, b) => a.sequence - b.sequence);
 
-    // ── Draw polyline ─────────────────────────────────────────────────────
+    // ── Update route polyline ──────────────────────────────────────────
     const coords = stops.map(s => [s.lng, s.lat]);
-    const geoJson = {
-      type: "Feature" as const,
-      geometry: { type: "LineString" as const, coordinates: coords },
-      properties: {},
-    };
-
-    const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
+    const src = map.getSource('bus-route') as mapboxgl.GeoJSONSource | undefined;
     if (src) {
-      src.setData(geoJson);
-    } else {
-      map.addSource("route", { type: "geojson", data: geoJson });
-      // Soft glow behind the line
-      map.addLayer({
-        id: "route-shadow",
-        type: "line",
-        source: "route",
-        layout: { "line-join": "round", "line-cap": "round" },
-        paint: { "line-color": "#0d9488", "line-width": 10, "line-opacity": 0.12, "line-blur": 5 },
-      });
-      // Main teal line
-      map.addLayer({
-        id: "route-line",
-        type: "line",
-        source: "route",
-        layout: { "line-join": "round", "line-cap": "round" },
-        paint: { "line-color": "#0d9488", "line-width": 4, "line-opacity": 0.9 },
-      });
-      // Subtle white dashes
-      map.addLayer({
-        id: "route-dash",
-        type: "line",
-        source: "route",
-        layout: { "line-join": "round", "line-cap": "round" },
-        paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.3, "line-dasharray": [4, 8] },
+      src.setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coords },
+        properties: {},
       });
     }
 
-    // ── Stop markers ──────────────────────────────────────────────────────
+    // ── Apply route-specific colour to line layers ─────────────────────
+    const routeColor = routeData.color || '#3b82f6';
+    if (map.getLayer('bus-route-shadow')) {
+      map.setPaintProperty('bus-route-shadow', 'line-color', routeColor);
+    }
+    if (map.getLayer('bus-route-line')) {
+      map.setPaintProperty('bus-route-line', 'line-color', routeColor);
+    }
+
+    // ── Stop markers ──────────────────────────────────────────────────
     stops.forEach((stop, idx) => {
       const main   = isMain(stop, idx, stops.length);
       const isLast = idx === stops.length - 1;
 
-      const el = document.createElement("div");
+      const el = document.createElement('div');
       el.className = isLast
-        ? "nextstop-stop-destination"
+        ? 'nextstop-stop-destination'
         : main
-          ? "nextstop-stop-main"
-          : "nextstop-stop-sub";
-      if (isLast) el.textContent = "🏫";
+          ? 'nextstop-stop-main'
+          : 'nextstop-stop-sub';
+      if (isLast) el.textContent = '🏫';
       el.title = stop.name;
 
-      el.addEventListener("click", () => {
+      el.addEventListener('click', () => {
         setActiveStopId(stop.id);
         setSheetOpen(true);
         map.flyTo({ center: [stop.lng, stop.lat], zoom: 16, duration: 800 });
         setTimeout(() => {
-          stopItemsRef.current.get(stop.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          stopItemsRef.current.get(stop.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 300);
       });
 
-      const popup = new maplibregl.Popup({
+      const popup = new mapboxgl.Popup({
         closeButton: false,
         offset: main ? 14 : 9,
-        className: "nextstop-popup",
+        className: 'nextstop-popup',
       }).setHTML(
         `<p style="font-weight:600;margin:0 0 3px">${stop.name}</p>
-         <p style="font-size:11px;color:#6b7280;margin:0">⏰ ${stop.scheduledTime}${stop.time1015am ? ` / ${stop.time1015am}` : ""}</p>`
+         <p style="font-size:11px;color:#6b7280;margin:0">⏰ ${stop.scheduledTime}${stop.time1015am ? ` / ${stop.time1015am}` : ''}</p>`
       );
 
-      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
         .setLngLat([stop.lng, stop.lat])
         .setPopup(popup)
         .addTo(map);
@@ -289,51 +378,27 @@ export default function BusMap({
       stopMarkersRef.current.push(marker);
     });
 
-    // ── Auto-fit viewport to route ────────────────────────────────────────
-    const bounds = new maplibregl.LngLatBounds();
-    stops.forEach(s => bounds.extend([s.lng, s.lat]));
-    map.fitBounds(bounds, {
-      padding: { top: 80, bottom: 230, left: 60, right: 60 },
-      maxZoom: 15,
-      duration: 1200,
-    });
+    // ── Fit viewport to route (after map is loaded, not during init) ──
+    if (stops.length > 1) {
+      const bounds = new mapboxgl.LngLatBounds();
+      stops.forEach(s => bounds.extend([s.lng, s.lat]));
+      map.fitBounds(bounds, {
+        padding: { top: 80, bottom: 230, left: 60, right: 60 },
+        maxZoom: 15,
+        duration: 1200,
+      });
+    }
   }, [routeData, mapLoaded]);
 
   // ── Active stop highlight ──────────────────────────────────────────────────
   useEffect(() => {
-    stopMarkersRef.current.forEach(m => m.getElement().classList.remove("active"));
+    stopMarkersRef.current.forEach(m => m.getElement().classList.remove('active'));
     if (activeStopId !== null) {
       const sorted = (routeData?.stops ?? []).sort((a, b) => a.sequence - b.sequence);
       const idx = sorted.findIndex(s => s.id === activeStopId);
-      if (idx >= 0) stopMarkersRef.current[idx]?.getElement().classList.add("active");
+      if (idx >= 0) stopMarkersRef.current[idx]?.getElement().classList.add('active');
     }
   }, [activeStopId, routeData]);
-
-  // ── Smooth marker animation ────────────────────────────────────────────────
-  const animateMarker = useCallback((target: [number, number], heading?: number) => {
-    const marker = busMarkerRef.current;
-    if (!marker) return;
-
-    const start = marker.getLngLat();
-    const from: [number, number] = [start.lng, start.lat];
-    const bearing = heading ?? (prevCoordsRef.current ? calcBearing(prevCoordsRef.current, target) : 0);
-    prevCoordsRef.current = target;
-
-    const t0  = performance.now();
-    const dur = 2800;
-
-    const frame = (now: number) => {
-      const p    = Math.min((now - t0) / dur, 1);
-      const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
-      marker.setLngLat([from[0] + (target[0] - from[0]) * ease, from[1] + (target[1] - from[1]) * ease]);
-      const icon = marker.getElement().querySelector(".nextstop-bus-icon") as HTMLElement | null;
-      if (icon) icon.style.transform = `translate(-50%,-50%) rotate(${bearing}deg)`;
-      if (p < 1) animFrameRef.current = requestAnimationFrame(frame);
-    };
-
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    animFrameRef.current = requestAnimationFrame(frame);
-  }, []);
 
   // ── ETA computation ────────────────────────────────────────────────────────
   const updateStopETAs = useCallback(
@@ -362,45 +427,27 @@ export default function BusMap({
 
   // ── Live location handler ──────────────────────────────────────────────────
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || locations.length === 0) return;
+    if (locations.length === 0) return;
 
     const loc = locations[0] as LiveLocation;
     setIsOffline(loc.driverOnline === false);
     setLiveSpeed(loc.speed ?? null);
 
-    // Prefer the road-snapped position (server-side OSRM map matching) so the
-    // bus glides along the actual road instead of floating over buildings.
-    // Falls back to raw GPS whenever a snap wasn't available for this fix.
+    // Prefer road-snapped position from OSRM, fall back to raw GPS
     const dispLat = loc.snappedLat ?? loc.lat;
     const dispLng = loc.snappedLng ?? loc.lng;
 
-    // Create bus marker on first GPS ping
-    if (!busMarkerRef.current) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "nextstop-bus-wrapper";
-      const pulse = document.createElement("div");
-      pulse.className = "nextstop-bus-pulse";
-      wrapper.appendChild(pulse);
-      const icon = document.createElement("img");
-      icon.src = busIcon;
-      icon.className = "nextstop-bus-icon";
-      wrapper.appendChild(icon);
-      busMarkerRef.current = new maplibregl.Marker({ element: wrapper, anchor: "center" })
-        .setLngLat([dispLng, dispLat])
-        .addTo(map);
-    }
+    // Stop the simulation once real data arrives
+    if (_simInterval) { clearInterval(_simInterval); _simInterval = null; }
 
-    animateMarker([dispLng, dispLat], loc.heading);
+    updateBusPosition(dispLng, dispLat, loc.speed ?? 0, loc.busId ?? 'BUS-01');
+
     if (routeData) updateStopETAs({ ...loc, lat: dispLat, lng: dispLng }, routeData.stops);
-    if (role === "student") {
-      map.easeTo({ center: [dispLng, dispLat], duration: 1500 });
-    }
 
-    // Offline detection — 15 s silence = offline
-    if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
-    offlineTimerRef.current = setTimeout(() => setIsOffline(true), 15_000);
-  }, [locations, routeData, animateMarker, updateStopETAs, role]);
+    if (role === 'student' && mapRef.current) {
+      mapRef.current.easeTo({ center: [dispLng, dispLat], duration: 1500 });
+    }
+  }, [locations, routeData, updateStopETAs, role]);
 
   // ── Fly to stop ────────────────────────────────────────────────────────────
   const flyToStop = useCallback((stop: RouteStop) => {
@@ -408,7 +455,7 @@ export default function BusMap({
     setActiveStopId(stop.id);
     setSheetOpen(true);
     setTimeout(() => {
-      stopItemsRef.current.get(stop.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      stopItemsRef.current.get(stop.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 300);
   }, []);
 
@@ -434,10 +481,16 @@ export default function BusMap({
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="relative w-full h-full overflow-hidden" data-testid="bus-map">
-
-      {/* Map canvas */}
-      <div ref={containerRef} className="absolute inset-0" />
+    <div
+      className="relative overflow-hidden"
+      data-testid="bus-map"
+      style={{ display: 'flex', flex: 1, width: '100%', minHeight: '600px', height: '100vh', position: 'relative' }}
+    >
+      {/* Map canvas — fills parent absolutely */}
+      <div
+        ref={containerRef}
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+      />
 
       {/* ── No route overlay ─────────────────────────────────────────────── */}
       {!routeId && (
@@ -474,7 +527,7 @@ export default function BusMap({
       <div className="absolute top-3 right-3 z-50">
         <span
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium shadow-md ${
-            isConnected && !isOffline ? "bg-green-500 text-white" : "bg-gray-600/90 text-white"
+            isConnected && !isOffline ? 'bg-green-500 text-white' : 'bg-gray-600/90 text-white'
           }`}
           data-testid="status-connection"
         >
@@ -484,11 +537,11 @@ export default function BusMap({
         </span>
       </div>
 
-      {/* ── ETA chip (bus is live + stop is selected) ─────────────────────── */}
+      {/* ── ETA chip ─────────────────────────────────────────────────────── */}
       {selectedStopData && eta !== null && (
         <div
           className="absolute left-3 right-3 z-40 bg-white/96 backdrop-blur rounded-xl px-4 py-3 shadow-lg flex items-center gap-3"
-          style={{ top: isOffline && locations.length > 0 ? "72px" : "48px" }}
+          style={{ top: isOffline && locations.length > 0 ? '72px' : '48px' }}
           data-testid="eta-panel"
         >
           <div className="flex-1 min-w-0">
@@ -500,7 +553,7 @@ export default function BusMap({
           <div className="text-right flex-shrink-0">
             <p className="text-xs text-gray-400">ETA</p>
             <p className="text-xl font-bold text-teal-600" data-testid="text-eta">
-              {eta === -1 ? "Passed" : eta === 0 ? "~Now" : `${eta} min`}
+              {eta === -1 ? 'Passed' : eta === 0 ? '~Now' : `${eta} min`}
             </p>
           </div>
           {liveSpeed !== null && (
@@ -517,7 +570,7 @@ export default function BusMap({
       {/* ── Re-centre button ─────────────────────────────────────────────── */}
       <div
         className="absolute right-3 z-40 transition-all duration-300"
-        style={{ bottom: sheetOpen ? "calc(55vh + 10px)" : "214px" }}
+        style={{ bottom: sheetOpen ? 'calc(55vh + 10px)' : '214px' }}
       >
         <Button
           size="icon"
@@ -542,22 +595,20 @@ export default function BusMap({
           className="absolute left-0 right-0 z-50 bg-white rounded-t-2xl shadow-2xl flex flex-col"
           style={{
             bottom: 0,
-            height: sheetOpen ? "55vh" : "200px",
-            transition: "height 0.35s cubic-bezier(0.4,0,0.2,1)",
+            height: sheetOpen ? '55vh' : '200px',
+            transition: 'height 0.35s cubic-bezier(0.4,0,0.2,1)',
           }}
           data-testid="stop-sheet"
         >
-          {/* Header — tappable to expand/collapse */}
+          {/* Header */}
           <div
             className="flex-shrink-0 cursor-pointer select-none"
             onClick={() => setSheetOpen(o => !o)}
           >
-            {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-10 h-1 bg-gray-200 rounded-full" />
             </div>
 
-            {/* Route name + meta */}
             <div className="flex items-center justify-between px-4 py-1.5">
               <div className="min-w-0">
                 <p className="font-bold text-gray-900 text-sm capitalize truncate">
@@ -585,7 +636,6 @@ export default function BusMap({
               </div>
             </div>
 
-            {/* Search */}
             <div className="px-4 py-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
@@ -628,41 +678,41 @@ export default function BusMap({
                       ref={el => el && stopItemsRef.current.set(stop.id, el)}
                       onClick={() => flyToStop(stop)}
                       className={`flex items-start gap-3 px-2 py-2.5 rounded-xl cursor-pointer transition-all duration-150 ${
-                        isActive ? "bg-teal-50 ring-1 ring-inset ring-teal-200"
-                        : isSel  ? "bg-amber-50"
-                        : "hover:bg-gray-50 active:bg-gray-100"
+                        isActive ? 'bg-teal-50 ring-1 ring-inset ring-teal-200'
+                        : isSel  ? 'bg-amber-50'
+                        : 'hover:bg-gray-50 active:bg-gray-100'
                       }`}
                       data-testid={`stop-row-${stop.id}`}
                     >
                       {/* Vertical connector */}
                       <div className="flex flex-col items-center mt-1 flex-shrink-0" style={{ width: 18 }}>
                         <div className={`rounded-full flex-shrink-0 border-2 transition-all ${
-                          isCurr   ? "w-4 h-4 bg-green-500 border-green-400 shadow-[0_0_0_3px_rgba(34,197,94,0.2)]"
-                          : isPassed ? "w-2.5 h-2.5 bg-gray-200 border-gray-200"
-                          : isSel    ? "w-4 h-4 bg-amber-400 border-amber-300"
-                          : isActive  ? "w-4 h-4 bg-teal-500 border-teal-400"
-                          : main      ? "w-3.5 h-3.5 bg-white border-teal-400"
-                          :             "w-2 h-2 bg-teal-300 border-transparent"
+                          isCurr    ? 'w-4 h-4 bg-green-500 border-green-400 shadow-[0_0_0_3px_rgba(34,197,94,0.2)]'
+                          : isPassed ? 'w-2.5 h-2.5 bg-gray-200 border-gray-200'
+                          : isSel    ? 'w-4 h-4 bg-amber-400 border-amber-300'
+                          : isActive  ? 'w-4 h-4 bg-teal-500 border-teal-400'
+                          : main      ? 'w-3.5 h-3.5 bg-white border-teal-400'
+                          :             'w-2 h-2 bg-teal-300 border-transparent'
                         }`} />
                         {!isLast && (
-                          <div className={`w-0.5 mt-1 ${isPassed ? "bg-gray-100" : "bg-teal-100"}`} style={{ height: 20 }} />
+                          <div className={`w-0.5 mt-1 ${isPassed ? 'bg-gray-100' : 'bg-teal-100'}`} style={{ height: 20 }} />
                         )}
                       </div>
 
                       {/* Name + time */}
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm leading-snug ${
-                          isPassed   ? "text-gray-300 line-through"
-                          : isSel    ? "font-bold text-amber-700"
-                          : isActive ? "font-semibold text-teal-700"
-                          : main     ? "font-medium text-gray-800"
-                          :            "text-gray-600"
+                          isPassed   ? 'text-gray-300 line-through'
+                          : isSel    ? 'font-bold text-amber-700'
+                          : isActive ? 'font-semibold text-teal-700'
+                          : main     ? 'font-medium text-gray-800'
+                          :            'text-gray-600'
                         }`}>
                           {stop.name}
                           {isSel  && <span className="ml-1 text-xs">📍</span>}
                           {isCurr && <span className="ml-1 text-xs">🚌</span>}
                         </p>
-                        <p className={`text-xs mt-0.5 flex items-center gap-1 ${isPassed ? "text-gray-200" : "text-gray-400"}`}>
+                        <p className={`text-xs mt-0.5 flex items-center gap-1 ${isPassed ? 'text-gray-200' : 'text-gray-400'}`}>
                           <Clock className="h-2.5 w-2.5 inline" />
                           {stop.scheduledTime}
                           {stop.time1015am && <span className="opacity-60">/ {stop.time1015am}</span>}

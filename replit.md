@@ -38,3 +38,13 @@ A real-time college bus tracking application built for JCET College. It allows s
 - Admin: admin / admin123
 - Driver: driver1 / driver123
 - Student: 2JH23CS001 / student123
+
+## Setup Status (imported from GitHub)
+- **Dependencies**: installed via `npm install`
+- **DATABASE_URL**: ⚠️ not set — required to start the server (provision a Replit PostgreSQL database and run `npm run db:push` to apply schema)
+- **SESSION_SECRET**: ✅ available as a Replit secret
+- **OSRM_BASE_URL**: set to a local IP in `.replit` — needs a real endpoint for route calculations
+- **Map library**: MapLibre GL JS (`maplibre-gl`) — uses CartoDB Positron tiles (no token needed)
+
+## User Preferences
+- User wants to make specific code changes (not necessarily run the app immediately)

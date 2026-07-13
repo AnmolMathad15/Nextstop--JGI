@@ -335,8 +335,8 @@ html, body {
   box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.25), 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-/* MapLibre popup override */
-.nextstop-popup .maplibregl-popup-content {
+/* Mapbox GL popup override */
+.nextstop-popup .mapboxgl-popup-content {
   border-radius: 12px;
   padding: 10px 14px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
@@ -346,12 +346,12 @@ html, body {
   color: #111;
 }
 
-.nextstop-popup .maplibregl-popup-tip {
+.nextstop-popup .mapboxgl-popup-tip {
   border-top-color: white !important;
 }
 
 /* Map attribution compact */
-.maplibregl-ctrl-attrib.maplibregl-compact {
+.mapboxgl-ctrl-attrib.mapboxgl-compact {
   opacity: 0.6;
   font-size: 10px;
 }

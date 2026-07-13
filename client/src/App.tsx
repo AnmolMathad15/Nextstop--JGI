@@ -11,6 +11,7 @@ import StudentPage from "@/pages/StudentPage";
 import DriverPage from "@/pages/DriverPage";
 import AdminPage from "@/pages/AdminPage";
 import NotFound from "@/pages/not-found";
+import FullscreenButton from "@/components/FullscreenButton";
 
 function AppContent() {
   const { user, authData, isAuthenticated, login, logout } = useAuth();
@@ -81,6 +82,7 @@ function App() {
       <TooltipProvider>
         <AuthProvider>
           <Toaster />
+          <FullscreenButton />
           <Router />
         </AuthProvider>
       </TooltipProvider>

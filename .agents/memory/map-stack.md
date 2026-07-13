@@ -1,46 +1,25 @@
 ---
-name: Map stack — MapLibre GL not Leaflet
-description: BusMap uses maplibregl directly (not react-leaflet). CartoDB Positron tile URLs and marker patterns.
+name: Map stack
+description: Which map library is used and how BusMap is wired up
 ---
 
-# Map Stack
+# Map Stack: Mapbox GL JS
 
-## Library
-`maplibre-gl` is already installed. Do NOT switch to Leaflet/react-leaflet — they are NOT installed.
-Import: `import maplibregl from 'maplibre-gl'` + `import 'maplibre-gl/dist/maplibre-gl.css'`
+`BusMap.tsx` uses **mapbox-gl** (NOT react-leaflet or maplibre-gl — those are removed).
 
-## CartoDB Positron tile URLs (3 subdomains)
-```
-https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png
-https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png
-https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png
-```
-Attribution required: `© OpenStreetMap contributors © CARTO`
+**Why:** Migrated from MapLibre GL JS to Mapbox GL JS per user spec to fix canvas sizing bug and add real-time tracking layer architecture.
 
-## Custom marker pattern
-Use `maplibregl.Marker({ element: domEl, anchor: "center" })` — no HTML divIcon (that's Leaflet).
-CSS classes for markers are in `client/src/index.css` under "NextStop Custom Map Markers":
-- `.nextstop-bus-wrapper` + `.nextstop-bus-pulse` — bus marker with CSS pulse animation
-- `.nextstop-stop-main` — 18px teal-bordered circle
-- `.nextstop-stop-sub` — 10px teal dot
-- `.nextstop-stop-destination` — 22px gradient circle for last stop
-- `.nextstop-college-marker` — 50px circle for JGI logo
+**Token/style:** stored as `VITE_MAPBOX_TOKEN` and `VITE_MAPBOX_STYLE` env vars (shared environment). Falls back to `mapbox://styles/mapbox/streets-v12`.
 
-## Polyline
-Use GeoJSON source + line layer (NOT react-leaflet Polyline).
-Use `as const` type assertions instead of `GeoJSON.Feature<GeoJSON.LineString>` type (avoids extra import).
+**How to apply:**
+- All map code in `client/src/components/BusMap.tsx`
+- CSS class selectors are `.mapboxgl-*` (not maplibregl)
+- Live bus position uses a GeoJSON source (`live-bus-source`) + circle layer (`live-bus-layer`), updated via `source.setData()` — no DOM marker recreation on GPS updates
+- `updateBusPosition(lng, lat, speed, busId)` is a module-level exported function that updates the GeoJSON source; wires into useWebSocket locations array
+- `startSimulatedTracking()` auto-runs on map load; stops when real WebSocket data arrives
+- Canvas sizing fix: outer div uses inline `style={{ display:'flex', flex:1, width:'100%', minHeight:'600px', height:'100vh', position:'relative' }}`; inner canvas div uses `position:absolute, top:0, left:0, width:100%, height:100%`
+- `map.resize()` called inside `map.on('load')` + `window.addEventListener('resize', ...)` (cleaned up on unmount)
+- Stop markers and college pin still use `mapboxgl.Marker` with custom DOM elements
+- Route polyline uses source `bus-route` + layers `bus-route-line`, `bus-route-shadow`, `bus-route-dash` (#3b82f6 blue)
 
-## fitBounds
-`map.fitBounds(bounds, { padding: { top, bottom, left, right }, maxZoom, duration })`
-Bottom padding should be ≥230px to account for the bottom sheet.
-
-## Bottom sheet
-Pure CSS sliding panel: `position: absolute; bottom: 0; height: sheetOpen ? "55vh" : "200px"`.
-CSS transition: `height 0.35s cubic-bezier(0.4,0,0.2,1)`.
-Lives inside `BusMap` (not a separate component), uses `stopItemsRef` Map for scroll-into-view.
-
-## onBusOffline callback signature
-`(tripId: string, routeId: number) => void` — must match exactly.
-
-**Why:** MapLibre GL was chosen because it's already installed and supports raster tiles out of the box.
-Switching to Leaflet would require installing react-leaflet and leaflet npm packages.
+**Missing module fixed:** `server/mapMatching.ts` was missing from the repo. Created a stub that uses OSRM (`OSRM_BASE_URL` env var) for road-snapping and falls back gracefully when OSRM is unreachable.

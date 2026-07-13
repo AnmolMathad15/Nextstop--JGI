@@ -1,3 +1,3 @@
 - [GPS Fleet System Architecture](gps-fleet-system.md) — LocationService is source-agnostic; all GPS providers feed through validateLocation() before broadcast.
 - [WebSocket message types](ws-message-types.md) — Full list of WS message types including pause/resume/fleet alerts added in GPS feature build.
-- [Map stack: MapLibre GL not Leaflet](map-stack.md) — BusMap uses maplibregl directly (NOT react-leaflet). CartoDB Positron tiles used for clean base map.
+- [Map stack: Mapbox GL JS](map-stack.md) — BusMap migrated to mapbox-gl. GeoJSON source for live bus, exported updateBusPosition(). mapMatching.ts stub created.

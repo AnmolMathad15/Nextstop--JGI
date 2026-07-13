@@ -52,3 +52,4 @@ stack = "FULLSTACK_JS"
 
 [userenv.shared]
 OSRM_BASE_URL = "http://your-local-ip:5000"
+VITE_MAPBOX_STYLE = "mapbox://styles/anmol-15/cmra6hgfg001h01quhh5j42i4"

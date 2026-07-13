@@ -1,0 +1,46 @@
+Role & Objective:
+You are a Senior GIS Frontend Engineer. We have successfully migrated our "NextStop JGI" college bus tracking application from MapLibre to Mapbox GL JS using a custom Mapbox Studio style. However, our interactive dashboard UI (the bottom drawer showing route selection, stop lists, and live ETAs) is currently disconnected from the new map instance.
+Your objective is to wire our existing UI event handlers directly to Mapbox GL JS, ensuring that all route highlights strictly follow our pre-defined Mapbox road geometries and feature custom stop popups matching our UI design.
+
+Phase 1: Connect Route Selection (The Highlighted Blue Line)
+When a user selects a route from the bottom drawer (e.g., "Pg Route"):
+
+Use Road-Snapped Geometries: Ensure the route line rendered on the map strictly follows the road network and custom pathways defined in our Mapbox style/backend (do NOT render straight point-to-point bird-flight lines).
+
+Dynamic Route Highlighting:
+
+Maintain a dedicated GeoJSON LineString source named active-route-source.
+
+Create a layer named active-route-layer styled with our UI primary color (#3b82f6, width: 5px, opacity: 0.9, rounded caps and joints).
+
+When a route is selected in the UI, update the source using map.getSource('active-route-source').setData(selectedRouteGeoJSON).
+
+Alternatively, if routes are already baked into our Mapbox Studio style as vector layers, use map.setFilter('your-studio-route-layer', ['==', ['get', 'route_id'], selectedRouteId]) and map.setLayoutProperty('your-studio-route-layer', 'visibility', 'visible').
+
+Camera Auto-Fit: Automatically trigger map.fitBounds(routeBounds, { padding: 80, duration: 1200 }) so the selected route fits perfectly within the viewport.
+
+Phase 2: Connect Stop Selection & ETA Popups
+When a user clicks a specific bus stop in the bottom list (e.g., "siddeshwar park"):
+
+Camera Fly-To: Smoothly animate the map camera to the stop's exact coordinates using map.flyTo({ center: [stop.lng, stop.lat], zoom: 16, speed: 1.2 }).
+
+Custom Styled Popups: Close any open popups and instantiate a new mapboxgl.Popup at the stop location. The HTML content MUST match our UI design:
+
+HTML
+<div class="stop-eta-card" style="padding: 6px 10px; font-family: sans-serif; background: white; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+  <div style="font-weight: 700; font-size: 14px; color: #1e293b;">${stop.name}</div>
+  <div style="color: #64748b; font-size: 12px; margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+    <span>⏰</span> <span style="color: #ef4444; font-weight: 600;">${stop.eta}</span>
+  </div>
+</div>
+Active Stop Highlight: Visually highlight the selected stop marker on the map (e.g., changing its circle layer color to green #10b981 to match the UI list selection state).
+
+Phase 3: Live Bus Marker & Dashboard Synchronization
+As live GPS telemetry arrives:
+
+Update the vehicle position smoothly without destroying DOM elements by updating the live-bus-source data: map.getSource('live-bus-source').setData(...).
+
+Ensure that when a vehicle moves along the highlighted blue route, clicking the vehicle marker opens a popup showing the Bus ID, current speed, and the live ETA for the immediate next stop.
+
+Phase 4: Code Integration Check
+Analyze our dashboard drawer component (where the route list and stop list reside) and ensure the onClick handlers (e.g., onSelectRoute, onSelectStop) are properly exporting their data to our map component so these Mapbox functions trigger reliably on every click.
