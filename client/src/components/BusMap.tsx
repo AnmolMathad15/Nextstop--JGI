@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { HUBLI_CENTER, JCET_COLLEGE_COORDS } from "@/lib/constants";
-import { ROUTE_GEOMETRY, ROUTE_GEOJSON_COLOR, ALL_ROUTES_GEOJSON } from "@/lib/routeGeometry";
+import { ROUTE_GEOJSON_COLOR, ALL_ROUTES_GEOJSON } from "@/lib/routeGeometry";
 import { BUS_STOPS_GEOJSON, parseStopName } from "@/lib/busStopsData";
+import { fetchRoadSnappedRoute, prefetchAllRoutes } from "@/lib/routeDirections";
 import jgiLogo from "@/assets/jgi-logo.png";
 
 // ── Mapbox token ───────────────────────────────────────────────────────────────
@@ -375,6 +376,9 @@ export default function BusMap({
       // ── Start simulated tracking to confirm render ─────────────────────
       startSimulatedTracking();
 
+      // Pre-warm the Directions API cache for all routes in the background
+      prefetchAllRoutes();
+
       setMapLoaded(true);
     });
 
@@ -408,45 +412,45 @@ export default function BusMap({
     stopMarkersRef.current.forEach(m => m.remove());
     stopMarkersRef.current = [];
 
-    const stops = [...routeData.stops].sort((a, b) => a.sequence - b.sequence);
-
-    // ── Update active-route polyline from GeoJSON coordinates ─────────
-    const coords: [number, number][] =
-      ROUTE_GEOMETRY[routeData.id] ?? stops.map(s => [s.lng, s.lat] as [number, number]);
-    const src = map.getSource('bus-route') as mapboxgl.GeoJSONSource | undefined;
-    if (src) {
-      src.setData({
-        type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates: coords },
-          properties: {},
-        }],
-      });
-    }
-
-    // ── Route colour from GeoJSON palette ─────────────────────────────
     const geojsonColor = ROUTE_GEOJSON_COLOR[routeData.id] ?? routeData.color ?? '#3b82f6';
+
+    // Apply route colour and stop filter immediately (before async fetch)
     if (map.getLayer('bus-route-shadow')) map.setPaintProperty('bus-route-shadow', 'line-color', geojsonColor);
     if (map.getLayer('bus-route-line'))   map.setPaintProperty('bus-route-line',   'line-color', geojsonColor);
-
-    // ── Show only this route's stops via Mapbox filter ────────────────
     const stopFilter: mapboxgl.FilterSpecification = ['==', ['get', 'color'], geojsonColor];
     if (map.getLayer('bus-stops-circle')) map.setFilter('bus-stops-circle', stopFilter);
     if (map.getLayer('bus-stops-label'))  map.setFilter('bus-stops-label',  stopFilter);
 
-    // ── Fit viewport to route geometry ────────────────────────────────
-    if (coords.length > 1) {
-      const bounds = coords.reduce(
-        (b, c) => b.extend(c as [number, number]),
-        new mapboxgl.LngLatBounds(coords[0], coords[0])
-      );
-      map.fitBounds(bounds, {
-        padding: { top: 80, bottom: 230, left: 60, right: 60 },
-        maxZoom: 14,
-        duration: 1200,
-      });
-    }
+    // ── Fetch road-snapped geometry from Mapbox Directions API ────────
+    let cancelled = false;
+    fetchRoadSnappedRoute(routeData.id).then((coords) => {
+      if (cancelled || !mapRef.current) return;
+      const src = mapRef.current.getSource('bus-route') as mapboxgl.GeoJSONSource | undefined;
+      if (src) {
+        src.setData({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: coords },
+            properties: {},
+          }],
+        });
+      }
+      // Fit viewport to the actual road-following geometry
+      if (coords.length > 1) {
+        const bounds = coords.reduce(
+          (b, c) => b.extend(c),
+          new mapboxgl.LngLatBounds(coords[0], coords[0])
+        );
+        mapRef.current?.fitBounds(bounds, {
+          padding: { top: 80, bottom: 230, left: 60, right: 60 },
+          maxZoom: 14,
+          duration: 1200,
+        });
+      }
+    });
+
+    return () => { cancelled = true; };
   }, [routeData, mapLoaded]);
 
   // ── ETA computation ────────────────────────────────────────────────────────
