@@ -40,12 +40,15 @@ A real-time college bus tracking application built for JCET College. It allows s
 - Student: 2JH23CS001 / student123
 
 ## Setup Status
-- **Dependencies**: ✅ installed
+- **Dependencies**: ✅ installed (re-run `npm install` after any fresh import — `node_modules` is not preserved)
 - **DATABASE_URL**: ✅ Replit PostgreSQL provisioned; schema applied via `npm run db:push`
 - **SESSION_SECRET**: ✅ Replit secret
 - **VITE_MAPBOX_TOKEN**: ✅ Replit secret — required for Mapbox GL JS map
 - **VITE_MAPBOX_STYLE**: ✅ set in `.replit` shared env (`mapbox://styles/anmol-15/cmra6hgfg001h01quhh5j42i4`)
 - **OSRM_BASE_URL**: ⚠️ set to a local IP — needs a real OSRM endpoint for route calculations (non-critical)
+
+## Notes
+- `attached_assets/Pasted-...-Fle...txt` contains an unactioned architecture spec (a "Location Verification Engine" — GPS accuracy/speed/teleport validation, map-matching with Turf.js, confidence scoring, Socket.io auth, Redis caching) the user pasted for a possible future feature. Not implemented; ask before building it.
 
 ## User Preferences
 - User wants to make specific code changes after getting the app running
