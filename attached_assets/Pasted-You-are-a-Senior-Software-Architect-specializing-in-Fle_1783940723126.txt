@@ -1,0 +1,319 @@
+You are a Senior Software Architect specializing in Fleet Management Systems.
+
+I am developing a production-grade college bus tracking platform called "NextStop JGI" using:
+
+Frontend:
+- React 18
+- TypeScript
+- TailwindCSS
+- Mapbox GL JS
+
+Backend:
+- Node.js
+- Express
+- Socket.io
+- PostgreSQL
+- Drizzle ORM
+
+The system has three roles:
+1. Driver
+2. Student
+3. Admin
+
+The driver shares GPS location from a mobile browser.
+
+I DO NOT want a simple GPS tracking system.
+
+I want a production-grade Location Verification Engine similar to Uber, Ola, and Google Maps.
+
+---------------------------------------------------
+PART 1
+LOCATION COLLECTION
+---------------------------------------------------
+
+Implement browser Geolocation API using watchPosition().
+
+Requirements:
+
+• enableHighAccuracy:true
+
+• timeout:15000
+
+• maximumAge:3000
+
+Collect:
+
+latitude
+
+longitude
+
+accuracy
+
+speed
+
+heading
+
+altitude
+
+timestamp
+
+Every 10 seconds send data using Socket.io.
+
+Never use HTTP polling.
+
+Reconnect automatically if socket disconnects.
+
+---------------------------------------------------
+PART 2
+LOCATION VERIFICATION ENGINE
+---------------------------------------------------
+
+The backend must verify every incoming GPS packet before broadcasting.
+
+Implement:
+
+1. Accuracy Validation
+
+Reject GPS if:
+
+accuracy > 30 meters
+
+Reason:
+GPS drift is common indoors.
+
+---------------------------------------------------
+
+2. Speed Validation
+
+Calculate speed between two GPS packets.
+
+Reject impossible movement.
+
+Example:
+
+Distance = 600m
+
+Time = 5 seconds
+
+Speed = 432 km/h
+
+Reject.
+
+Bus speed should never exceed configurable limit (e.g. 90 km/h).
+
+---------------------------------------------------
+
+3. Teleport Detection
+
+Reject GPS if bus suddenly jumps more than 150 meters within a few seconds.
+
+Mark as suspicious.
+
+---------------------------------------------------
+
+4. Route Verification
+
+Every route has GeoJSON.
+
+Calculate distance between GPS and GeoJSON.
+
+If distance > 75m
+
+Bus is outside route.
+
+Raise warning.
+
+---------------------------------------------------
+
+5. Map Matching
+
+Use Turf.js
+
+nearestPointOnLine()
+
+Snap GPS to nearest road segment.
+
+Broadcast snapped coordinate.
+
+Never broadcast raw GPS.
+
+---------------------------------------------------
+
+6. Heading Verification
+
+Compare heading with road direction.
+
+If bus heading differs more than 90°
+
+Flag suspicious.
+
+---------------------------------------------------
+
+7. Timestamp Validation
+
+Reject old packets.
+
+Reject future timestamps.
+
+Accept only timestamps within 30 seconds.
+
+---------------------------------------------------
+
+8. Duplicate Packet Detection
+
+Ignore duplicate packets.
+
+---------------------------------------------------
+
+9. Driver Authentication
+
+Every socket connection must contain JWT.
+
+Reject unauthorized driver.
+
+---------------------------------------------------
+
+10. GPS Confidence Score
+
+Create confidence score.
+
+Example:
+
+Accuracy Good = +30
+
+On Route = +30
+
+Normal Speed = +20
+
+Correct Heading = +10
+
+Recent Timestamp = +10
+
+Total = 100
+
+If confidence
+
+90-100
+
+Verified
+
+70-89
+
+Accept
+
+Below 70
+
+Suspicious
+
+Below 40
+
+Reject
+
+---------------------------------------------------
+PART 3
+ADMIN ALERTS
+---------------------------------------------------
+
+Notify admin if:
+
+Driver leaves route
+
+GPS spoofing suspected
+
+GPS signal lost
+
+Driver offline
+
+Bus stationary for >10 min
+
+Speed exceeds limit
+
+No GPS updates for 30 seconds
+
+---------------------------------------------------
+PART 4
+SMOOTH TRACKING
+---------------------------------------------------
+
+Student map must never jump.
+
+Implement interpolation.
+
+Animate marker.
+
+Use requestAnimationFrame()
+
+Use Mapbox easeTo()
+
+Maintain currentBusLocation state.
+
+---------------------------------------------------
+PART 5
+LIVE STATUS
+---------------------------------------------------
+
+Display:
+
+Online
+
+Offline
+
+Poor GPS
+
+Good GPS
+
+Searching GPS
+
+GPS Lost
+
+Verified
+
+Suspicious
+
+---------------------------------------------------
+PART 6
+PERFORMANCE
+---------------------------------------------------
+
+Socket rooms per route.
+
+Only students of that route receive updates.
+
+Store latest location in Redis.
+
+Store history in PostgreSQL.
+
+---------------------------------------------------
+PART 7
+SECURITY
+---------------------------------------------------
+
+Prevent fake GPS.
+
+Prevent replay attacks.
+
+Prevent socket spoofing.
+
+Prevent unauthorized route access.
+
+---------------------------------------------------
+PART 8
+CODE QUALITY
+
+Use:
+
+TypeScript
+
+Modular services
+
+Socket namespaces
+
+Validation middleware
+
+Error logging
+
+Rate limiting
+
+Reusable utility functions
+
+The architecture should be scalable to 1000+ buses.
