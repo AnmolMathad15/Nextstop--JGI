@@ -1,0 +1,422 @@
+I am building a production-quality college bus tracking platform called "NextStop JGI".
+
+Tech Stack
+------------
+Frontend:
+- React 18
+- TypeScript
+- Socket.io Client
+- React Query
+- React Toastify
+- MapLibre GL JS
+
+Backend
+------------
+- Node.js
+- Express
+- Socket.io
+- TypeScript
+- PostgreSQL
+- Turf.js
+- Haversine calculations
+- OSRM Route Matching
+- Redis (optional for scaling)
+
+Goal
+------------
+Build an intelligent notification engine similar to Uber, Ola and Google Maps.
+
+The system should never rely only on straight-line GPS distance.
+
+Instead it must combine:
+
+• GPS position
+• Road snapped position
+• Route progress
+• Average speed
+• Current speed
+• Stop geofences
+• ETA prediction
+• Notification history
+
+==================================================
+STEP 1
+Route Progress Engine
+==================================================
+
+After GPS arrives,
+
+1. Snap GPS onto the actual bus route using OSRM Map Matching.
+
+2. Find
+
+currentSegment
+
+currentDistanceAlongRoute
+
+remainingDistanceToNextStop
+
+instead of using straight-line distance.
+
+==================================================
+STEP 2
+ETA Engine
+==================================================
+
+Calculate ETA using
+
+ETA =
+Remaining Route Distance
+/
+Average Moving Speed
+
+Average speed should be computed from the previous 60 seconds instead of instantaneous GPS speed.
+
+If speed becomes unrealistic
+
+<5 km/h
+or
+>80 km/h
+
+ignore it and use rolling average.
+
+==================================================
+STEP 3
+Notification Rules
+==================================================
+
+Create multiple notification stages.
+
+Stage 1
+
+10 minutes away
+
+Stage 2
+
+5 minutes away
+
+Stage 3
+
+2 minutes away
+
+Stage 4
+
+Bus entering stop
+
+Stage 5
+
+Bus departed
+
+Stage 6
+
+Bus delayed
+
+Stage 7
+
+Route changed
+
+Stage 8
+
+Driver overspeed warning
+
+Stage 9
+
+Trip started
+
+Stage 10
+
+Trip completed
+
+==================================================
+STEP 4
+Notification Spam Protection
+==================================================
+
+Maintain
+
+notificationHistory
+
+per
+
+Bus
+
+Stop
+
+Trip
+
+User
+
+Store
+
+lastNotificationType
+
+lastSentTime
+
+Only send again if
+
+notification type changes
+
+OR
+
+bus leaves stop and returns
+
+OR
+
+new trip starts
+
+==================================================
+STEP 5
+Geofence System
+==================================================
+
+Every stop has
+
+Arrival Radius = 500m
+
+Near Radius = 1000m
+
+Departure Radius = 300m
+
+When entering
+
+1000m
+
+send
+
+"Bus approaching"
+
+Entering
+
+500m
+
+force
+
+"2 Minutes Away"
+
+Entering
+
+100m
+
+send
+
+"Bus has arrived"
+
+Leaving
+
+300m
+
+send
+
+"Bus departed"
+
+==================================================
+STEP 6
+Speed Prediction
+==================================================
+
+Maintain
+
+rollingAverageSpeed
+
+last30GPSPoints
+
+lastHeading
+
+lastTimestamp
+
+Ignore GPS jumps.
+
+Smooth GPS using Kalman Filter or Moving Average.
+
+==================================================
+STEP 7
+Driver Validation
+==================================================
+
+Reject GPS if
+
+speed >120 km/h
+
+jump >250m in 2 sec
+
+heading changes unrealistically
+
+accuracy >50m
+
+If suspicious
+
+mark GPS as unreliable
+
+and continue using previous predicted position.
+
+==================================================
+STEP 8
+Student Notifications
+==================================================
+
+Students only receive notifications for
+
+their selected stop
+
+their route
+
+their trip
+
+their batch
+
+Example
+
+Route 3
+
+10:15 AM
+
+Stop
+
+BVB
+
+Student A only receives BVB notifications.
+
+==================================================
+STEP 9
+Socket Events
+==================================================
+
+Implement events
+
+gps:update
+
+route:update
+
+eta:update
+
+notification
+
+trip:start
+
+trip:end
+
+bus:offline
+
+driver:panic
+
+==================================================
+STEP 10
+Frontend
+==================================================
+
+Use React Toastify.
+
+Different colors
+
+Blue
+
+Upcoming
+
+Orange
+
+Delayed
+
+Green
+
+Arrived
+
+Red
+
+Emergency
+
+Every toast should contain
+
+Bus Name
+
+Route
+
+ETA
+
+Stop Name
+
+Current Speed
+
+Expected Arrival Time
+
+==================================================
+STEP 11
+Persistence
+==================================================
+
+Store
+
+trip history
+
+notifications
+
+arrival time
+
+departure time
+
+actual ETA
+
+predicted ETA
+
+driver statistics
+
+==================================================
+STEP 12
+Analytics
+==================================================
+
+Create APIs
+
+Most delayed stops
+
+Average ETA accuracy
+
+Average trip duration
+
+Driver punctuality
+
+Notification delivery rate
+
+Average bus speed
+
+==================================================
+STEP 13
+Code Requirements
+==================================================
+
+Provide
+
+Folder structure
+
+Socket architecture
+
+Express middleware
+
+TypeScript types
+
+Database schema
+
+Notification service
+
+ETA service
+
+Route service
+
+Geofence service
+
+Socket handlers
+
+React hooks
+
+React Context
+
+Toast components
+
+Unit tests
+
+Edge case handling
+
+Error handling
+
+Scalable architecture
+
+Everything should be production ready with proper comments.
