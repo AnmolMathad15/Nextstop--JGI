@@ -42,9 +42,13 @@ export async function createApp() {
     next();
   });
 
-  // ── CORS (permissive for Vercel cross-origin fetches) ──────────────────────
+  // ── CORS ───────────────────────────────────────────────────────────────────
+  // Reflect the request origin so credentialed fetches (credentials:"include")
+  // work correctly.  Browsers reject credentialed requests when ACAO is "*".
   app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const origin = req.headers.origin;
+    if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
     if (req.method === "OPTIONS") return res.sendStatus(204);

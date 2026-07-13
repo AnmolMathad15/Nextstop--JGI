@@ -1,27 +1,44 @@
 /**
  * api/index.ts — Vercel serverless entry point
  *
- * Vercel routes all /api/* requests here. The Express app is created once
- * per warm Lambda instance (cold-start initialises routes + seeds the DB).
- *
- * WebSocket behaviour on Vercel:
- *   • Hobby plan  — WS connections time out quickly; clients fall back to
- *                   REST polling automatically (useWebSocket.ts).
- *   • Pro plan    — Fluid compute keeps the function alive; WS works fully.
+ * All /api/* requests are routed here by vercel.json.
+ * The Express app is initialised once per warm Lambda instance.
  */
 
 import type { IncomingMessage, ServerResponse } from "http";
 import { createApp } from "../server/app";
 
-// Cache the app instance across warm invocations (avoids re-seeding on
-// every request while still working correctly on cold starts).
-let appHandler: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
+type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 
-const initPromise = createApp().then(({ app }) => {
-  appHandler = app as unknown as (req: IncomingMessage, res: ServerResponse) => void;
-});
+let appHandler: Handler | null = null;
+let initError: Error | null = null;
+
+// Initialise eagerly so the first real request doesn't pay the full cold-start
+// cost.  We capture any failure so we can return a proper 503 instead of
+// hanging or crashing the invocation silently.
+const initPromise = createApp()
+  .then(({ app }) => {
+    appHandler = app as unknown as Handler;
+  })
+  .catch((err: Error) => {
+    initError = err;
+    console.error("[api/index] Initialisation failed:", err.message);
+  });
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  if (!appHandler) await initPromise;
-  appHandler!(req, res);
+  // Wait for init (no-op on warm invocations)
+  await initPromise;
+
+  if (initError || !appHandler) {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: "Service unavailable — server failed to initialise.",
+        detail: initError?.message ?? "unknown",
+      }),
+    );
+    return;
+  }
+
+  appHandler(req, res);
 }
