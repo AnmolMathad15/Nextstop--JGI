@@ -1,14 +1,14 @@
-import { eq, desc, and, sql as drizzleSql } from "drizzle-orm";
+import { eq, desc, and, sql as drizzleSql, avg, count } from "drizzle-orm";
 import { db } from "./db";
 import {
   users, routes, routeStops, buses, drivers, students, trips, liveLocations,
-  geoEvents, driverStats, fleetAlerts,
+  geoEvents, driverStats, fleetAlerts, notifications,
   type User, type InsertUser, type Route, type InsertRoute,
   type RouteStop, type InsertRouteStop, type Bus, type InsertBus,
   type Driver, type InsertDriver, type Student, type InsertStudent,
   type Trip, type InsertTrip, type LiveLocation, type InsertLiveLocation,
   type GeoEvent, type InsertGeoEvent, type DriverStats, type InsertDriverStats,
-  type FleetAlert, type InsertFleetAlert,
+  type FleetAlert, type InsertFleetAlert, type Notification, type InsertNotification,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -50,9 +50,11 @@ export interface IStorage {
   getLatestLocationForTrip(tripId: string): Promise<LiveLocation | undefined>;
   getLatestLocationsForRoute(routeId: number): Promise<LiveLocation[]>;
 
-  // Analytics
+  // Geo events
   logGeoEvent(event: InsertGeoEvent): Promise<GeoEvent>;
   getLatestGeoEvent(tripId: string, stopId: number): Promise<GeoEvent | undefined>;
+
+  // Driver stats
   updateDriverStats(driverId: string, stats: Partial<InsertDriverStats>): Promise<DriverStats>;
   getDriverStats(driverId: string): Promise<DriverStats | undefined>;
 
@@ -60,6 +62,17 @@ export interface IStorage {
   createFleetAlert(alert: InsertFleetAlert): Promise<FleetAlert>;
   getFleetAlerts(status?: string): Promise<FleetAlert[]>;
   updateFleetAlertStatus(id: string, status: string, adminNotes?: string): Promise<FleetAlert | undefined>;
+
+  // Notifications
+  createNotification(n: InsertNotification): Promise<Notification>;
+  getNotifications(limit?: number): Promise<Notification[]>;
+
+  // Analytics
+  getAnalyticsMostDelayedStops(): Promise<{ stopName: string; routeId: number; avgDelayMin: number; count: number }[]>;
+  getAnalyticsAvgTripDuration(): Promise<{ avgMinutes: number; totalTrips: number }>;
+  getAnalyticsDriverPunctuality(): Promise<{ driverId: string; overspeedCount: number; performanceScore: number; totalDistance: number }[]>;
+  getAnalyticsAvgSpeed(): Promise<{ avgSpeedKmh: number }>;
+  getAnalyticsNotificationStats(): Promise<{ totalSent: number; byType: { type: string; count: number }[] }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -274,7 +287,8 @@ export class DatabaseStorage implements IStorage {
     return stats;
   }
 
-  // Fleet alerts
+  // ── Fleet alerts ──────────────────────────────────────────────────────────
+
   async createFleetAlert(alert: InsertFleetAlert): Promise<FleetAlert> {
     const [created] = await db.insert(fleetAlerts).values(alert).returning();
     return created;
@@ -295,6 +309,109 @@ export class DatabaseStorage implements IStorage {
       .where(eq(fleetAlerts.id, id))
       .returning();
     return updated;
+  }
+
+  // ── Notifications ─────────────────────────────────────────────────────────
+
+  async createNotification(n: InsertNotification): Promise<Notification> {
+    const [created] = await db.insert(notifications).values(n).returning();
+    return created;
+  }
+
+  async getNotifications(limit = 100): Promise<Notification[]> {
+    return db.select().from(notifications)
+      .orderBy(desc(notifications.sentAt))
+      .limit(limit);
+  }
+
+  // ── Analytics ──────────────────────────────────────────────────────────────
+
+  /**
+   * Most delayed stops: compares scheduledTime on routeStops with actual
+   * arrival recorded in geoEvents (REACHED). Returns top 10.
+   */
+  async getAnalyticsMostDelayedStops(): Promise<{
+    stopName: string; routeId: number; avgDelayMin: number; count: number;
+  }[]> {
+    // We compute delay as (actual arrival − scheduled time) in minutes.
+    // scheduledTime is stored as "HH:MM" string; we convert it to minutes-since-midnight.
+    const rows = await db.execute(drizzleSql`
+      SELECT
+        rs.name                                                        AS "stopName",
+        rs.route_id                                                    AS "routeId",
+        COUNT(ge.id)::int                                              AS "count",
+        AVG(
+          EXTRACT(EPOCH FROM ge.timestamp) / 60
+          - (
+              SPLIT_PART(rs.scheduled_time, ':', 1)::int * 60
+              + SPLIT_PART(rs.scheduled_time, ':', 2)::int
+              -- Offset by midnight of the geo-event day so comparison is same-day
+              + EXTRACT(EPOCH FROM DATE_TRUNC('day', ge.timestamp)) / 60
+            )
+        )::float                                                       AS "avgDelayMin"
+      FROM geo_events ge
+      JOIN route_stops rs ON rs.id = ge.stop_id
+      WHERE ge.type = 'REACHED'
+        AND rs.scheduled_time IS NOT NULL
+      GROUP BY rs.id, rs.name, rs.route_id
+      ORDER BY "avgDelayMin" DESC
+      LIMIT 10
+    `);
+    return rows.rows as { stopName: string; routeId: number; avgDelayMin: number; count: number }[];
+  }
+
+  /** Average trip duration across all completed trips (minutes). */
+  async getAnalyticsAvgTripDuration(): Promise<{ avgMinutes: number; totalTrips: number }> {
+    const result = await db.execute(drizzleSql`
+      SELECT
+        AVG(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60)::float AS "avgMinutes",
+        COUNT(*)::int                                                  AS "totalTrips"
+      FROM trips
+      WHERE status = 'completed' AND ended_at IS NOT NULL AND started_at IS NOT NULL
+    `);
+    const r = (result.rows?.[0] as { avgMinutes: number; totalTrips: number } | undefined)
+      ?? { avgMinutes: 0, totalTrips: 0 };
+    return r;
+  }
+
+  /** Driver punctuality: overspeed count + performance score for each driver. */
+  async getAnalyticsDriverPunctuality(): Promise<{
+    driverId: string; overspeedCount: number; performanceScore: number; totalDistance: number;
+  }[]> {
+    return db.select({
+      driverId:         driverStats.driverId,
+      overspeedCount:   driverStats.overspeedCount,
+      performanceScore: driverStats.performanceScore,
+      totalDistance:    driverStats.totalDistance,
+    }).from(driverStats).orderBy(desc(driverStats.performanceScore)) as Promise<{
+      driverId: string; overspeedCount: number; performanceScore: number; totalDistance: number;
+    }[]>;
+  }
+
+  /** Average bus speed from the live_locations table. */
+  async getAnalyticsAvgSpeed(): Promise<{ avgSpeedKmh: number }> {
+    const result = await db.execute(drizzleSql`
+      SELECT AVG(speed)::float AS "avgSpeedKmh"
+      FROM live_locations
+      WHERE speed IS NOT NULL AND speed > 0
+    `);
+    const r = (result.rows?.[0] as { avgSpeedKmh: number } | undefined) ?? { avgSpeedKmh: 0 };
+    return r;
+  }
+
+  /** Notification delivery statistics: total sent and breakdown by type. */
+  async getAnalyticsNotificationStats(): Promise<{
+    totalSent: number; byType: { type: string; count: number }[];
+  }> {
+    const rows = await db.execute(drizzleSql`
+      SELECT notification_type AS type, COUNT(*)::int AS count
+      FROM notifications
+      GROUP BY notification_type
+      ORDER BY count DESC
+    `);
+    const byType = (rows.rows as { type: string; count: number }[]);
+    const totalSent = byType.reduce((s, r) => s + r.count, 0);
+    return { totalSent, byType };
   }
 }
 

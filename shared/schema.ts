@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, real, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, real, pgEnum, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -99,6 +99,25 @@ export const driverStats = pgTable("driver_stats", {
   lastUpdate: timestamp("last_update").defaultNow(),
 });
 
+// ── Notification history (persisted for analytics + delivery tracking) ─────────
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tripId: varchar("trip_id").references(() => trips.id),
+  busId: varchar("bus_id").references(() => buses.id),
+  routeId: integer("route_id").references(() => routes.id),
+  stopId: integer("stop_id").references(() => routeStops.id),
+  /** null = broadcast to all students on the route; set = targeted to one student */
+  userId: varchar("user_id").references(() => users.id),
+  notificationType: text("notification_type").notNull(),
+  etaMinutes: real("eta_minutes"),
+  busName: text("bus_name"),
+  routeName: text("route_name"),
+  stopName: text("stop_name"),
+  currentSpeed: real("current_speed"),
+  expectedArrival: text("expected_arrival"),
+  sentAt: timestamp("sent_at").defaultNow(),
+});
+
 // Fleet alert center
 export const fleetAlerts = pgTable("fleet_alerts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -117,6 +136,11 @@ export const fleetAlerts = pgTable("fleet_alerts", {
 });
 
 // ── Insert schemas ────────────────────────────────────────────────
+export const insertNotificationSchema = createInsertSchema(notifications).pick({
+  tripId: true, busId: true, routeId: true, stopId: true, userId: true,
+  notificationType: true, etaMinutes: true, busName: true, routeName: true,
+  stopName: true, currentSpeed: true, expectedArrival: true,
+});
 export const insertGeoEventSchema = createInsertSchema(geoEvents).pick({
   tripId: true, stopId: true, type: true,
 });
@@ -157,9 +181,11 @@ export const insertLiveLocationSchema = createInsertSchema(liveLocations).pick({
 export type GeoEvent      = typeof geoEvents.$inferSelect;
 export type DriverStats   = typeof driverStats.$inferSelect;
 export type FleetAlert    = typeof fleetAlerts.$inferSelect;
-export type InsertGeoEvent     = z.infer<typeof insertGeoEventSchema>;
-export type InsertDriverStats  = z.infer<typeof insertDriverStatsSchema>;
-export type InsertFleetAlert   = z.infer<typeof insertFleetAlertSchema>;
+export type Notification  = typeof notifications.$inferSelect;
+export type InsertGeoEvent       = z.infer<typeof insertGeoEventSchema>;
+export type InsertDriverStats    = z.infer<typeof insertDriverStatsSchema>;
+export type InsertFleetAlert     = z.infer<typeof insertFleetAlertSchema>;
+export type InsertNotification   = z.infer<typeof insertNotificationSchema>;
 export type InsertUser         = z.infer<typeof insertUserSchema>;
 export type User               = typeof users.$inferSelect;
 export type Route              = typeof routes.$inferSelect;

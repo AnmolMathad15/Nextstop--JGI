@@ -340,5 +340,105 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Notifications history ────────────────────────────────────────────────────
+
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      const notifs = await storage.getNotifications(limit);
+      res.json(notifs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  // ── Analytics ────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /api/analytics/delayed-stops
+   * Returns the top 10 stops with the highest average delay (minutes late).
+   */
+  app.get("/api/analytics/delayed-stops", async (_req, res) => {
+    try {
+      const data = await storage.getAnalyticsMostDelayedStops();
+      res.json(data);
+    } catch (error) {
+      console.error("Analytics delayed-stops error:", error);
+      res.status(500).json({ error: "Failed to fetch delayed stops analytics" });
+    }
+  });
+
+  /**
+   * GET /api/analytics/trip-duration
+   * Average trip duration across all completed trips.
+   */
+  app.get("/api/analytics/trip-duration", async (_req, res) => {
+    try {
+      const data = await storage.getAnalyticsAvgTripDuration();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch trip duration analytics" });
+    }
+  });
+
+  /**
+   * GET /api/analytics/driver-punctuality
+   * Per-driver overspeed count + performance score.
+   */
+  app.get("/api/analytics/driver-punctuality", async (_req, res) => {
+    try {
+      const data = await storage.getAnalyticsDriverPunctuality();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch driver punctuality analytics" });
+    }
+  });
+
+  /**
+   * GET /api/analytics/avg-speed
+   * Fleet-wide average speed derived from live_locations.
+   */
+  app.get("/api/analytics/avg-speed", async (_req, res) => {
+    try {
+      const data = await storage.getAnalyticsAvgSpeed();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch avg speed analytics" });
+    }
+  });
+
+  /**
+   * GET /api/analytics/notification-stats
+   * Total notifications sent + breakdown by type.
+   */
+  app.get("/api/analytics/notification-stats", async (_req, res) => {
+    try {
+      const data = await storage.getAnalyticsNotificationStats();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch notification stats" });
+    }
+  });
+
+  /**
+   * GET /api/analytics/summary
+   * All analytics combined in one response for dashboards.
+   */
+  app.get("/api/analytics/summary", async (_req, res) => {
+    try {
+      const [delayedStops, tripDuration, driverPunctuality, avgSpeed, notifStats] = await Promise.all([
+        storage.getAnalyticsMostDelayedStops(),
+        storage.getAnalyticsAvgTripDuration(),
+        storage.getAnalyticsDriverPunctuality(),
+        storage.getAnalyticsAvgSpeed(),
+        storage.getAnalyticsNotificationStats(),
+      ]);
+      res.json({ delayedStops, tripDuration, driverPunctuality, avgSpeed, notifStats });
+    } catch (error) {
+      console.error("Analytics summary error:", error);
+      res.status(500).json({ error: "Failed to fetch analytics summary" });
+    }
+  });
+
   return httpServer;
 }

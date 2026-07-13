@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 import RibbonBar from "@/components/RibbonBar";
 import AppHeader from "@/components/AppHeader";
 import RouteSelector from "@/components/RouteSelector";
@@ -10,6 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Bell, Moon, Sun, Volume2, MessageSquare } from "lucide-react";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useNotifications } from "@/hooks/useNotifications";
+import type { NotificationPayload } from "@/hooks/useWebSocket";
+import { useAuth } from "@/context/AuthContext";
 import backgroundImage from "@assets/jcet logo pic_1764501988672.jpg";
 
 type NavItem = "map" | "routes" | "alerts" | "settings";
@@ -30,6 +36,22 @@ export default function StudentPage({ userName, onLogout }: StudentPageProps) {
   const [selectedRoute, setSelectedRoute] = useState<number | null>(null);
   const [selectedStop, setSelectedStop] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  const { authData } = useAuth();
+  const { showNotification } = useNotifications();
+
+  // Handle incoming real-time notifications from the server
+  const handleNotification = useCallback((n: NotificationPayload) => {
+    showNotification(n);
+  }, [showNotification]);
+
+  // Connect to WebSocket for real-time updates
+  useWebSocket({
+    role: "student",
+    userId: authData?.user?.id,
+    routeId: selectedRoute ?? undefined,
+    onNotification: handleNotification,
+  });
 
   const handleRouteSelect = (routeId: number, stopName: string) => {
     setSelectedRoute(routeId);
@@ -180,6 +202,20 @@ export default function StudentPage({ userName, onLogout }: StudentPageProps) {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Toast notifications — colour-coded per stage */}
+      <ToastContainer
+        position="top-right"
+        autoClose={6000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+        style={{ zIndex: 9999 }}
+      />
+
       <div className="relative z-10 flex flex-col min-h-screen">
         <RibbonBar />
         <AppHeader 
