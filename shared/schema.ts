@@ -99,14 +99,13 @@ export const driverStats = pgTable("driver_stats", {
   lastUpdate: timestamp("last_update").defaultNow(),
 });
 
-// ── Notification history (persisted for analytics + delivery tracking) ─────────
+// ── Notification history ──────────────────────────────────────────────────────
 export const notifications = pgTable("notifications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tripId: varchar("trip_id").references(() => trips.id),
   busId: varchar("bus_id").references(() => buses.id),
   routeId: integer("route_id").references(() => routes.id),
   stopId: integer("stop_id").references(() => routeStops.id),
-  /** null = broadcast to all students on the route; set = targeted to one student */
   userId: varchar("user_id").references(() => users.id),
   notificationType: text("notification_type").notNull(),
   etaMinutes: real("eta_minutes"),
@@ -125,17 +124,38 @@ export const fleetAlerts = pgTable("fleet_alerts", {
   busId: varchar("bus_id").references(() => buses.id),
   driverId: varchar("driver_id").references(() => drivers.id),
   alertType: text("alert_type").notNull(),
-  // OUT_OF_AREA | RASH_DRIVING | OVERSPEED | GPS_OFFLINE | DRIVER_OFFLINE | STOP_REACHED
-  severity: text("severity").notNull().default("medium"), // low | medium | high
+  severity: text("severity").notNull().default("medium"),
   lat: real("lat"),
   lng: real("lng"),
-  details: text("details"), // JSON string with extra context
-  status: text("status").notNull().default("active"), // active | acknowledged | resolved
+  details: text("details"),
+  status: text("status").notNull().default("active"),
   adminNotes: text("admin_notes"),
   timestamp: timestamp("timestamp").defaultNow(),
 });
 
-// ── Insert schemas ────────────────────────────────────────────────
+// ── Schedules (timetable) ─────────────────────────────────────────────────────
+// Each row represents one "batch" departure for a route.
+// The two standard batches at JCET are the 07:30 morning run and 09:30 / 10:15 run.
+export const schedules = pgTable("schedules", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  routeId: integer("route_id").notNull().references(() => routes.id),
+  label: text("label").notNull(),          // "Morning Batch", "10:15 AM Batch"
+  departureTime: text("departure_time").notNull(), // "07:30", "09:30"
+  daysOfWeek: text("days_of_week").notNull().default("mon-sat"),
+  isActive: boolean("is_active").default(true),
+});
+
+// ── Push notification subscriptions ──────────────────────────────────────────
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// ── Insert schemas ────────────────────────────────────────────────────────────
 export const insertNotificationSchema = createInsertSchema(notifications).pick({
   tripId: true, busId: true, routeId: true, stopId: true, userId: true,
   notificationType: true, etaMinutes: true, busName: true, routeName: true,
@@ -176,16 +196,26 @@ export const insertTripSchema = createInsertSchema(trips).pick({
 export const insertLiveLocationSchema = createInsertSchema(liveLocations).pick({
   tripId: true, lat: true, lng: true, speed: true, heading: true, accuracy: true,
 });
+export const insertScheduleSchema = createInsertSchema(schedules).pick({
+  routeId: true, label: true, departureTime: true, daysOfWeek: true, isActive: true,
+});
+export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).pick({
+  userId: true, endpoint: true, p256dh: true, auth: true,
+});
 
-// ── Types ─────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 export type GeoEvent      = typeof geoEvents.$inferSelect;
 export type DriverStats   = typeof driverStats.$inferSelect;
 export type FleetAlert    = typeof fleetAlerts.$inferSelect;
 export type Notification  = typeof notifications.$inferSelect;
+export type Schedule      = typeof schedules.$inferSelect;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type InsertGeoEvent       = z.infer<typeof insertGeoEventSchema>;
 export type InsertDriverStats    = z.infer<typeof insertDriverStatsSchema>;
 export type InsertFleetAlert     = z.infer<typeof insertFleetAlertSchema>;
 export type InsertNotification   = z.infer<typeof insertNotificationSchema>;
+export type InsertSchedule       = z.infer<typeof insertScheduleSchema>;
+export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
 export type InsertUser         = z.infer<typeof insertUserSchema>;
 export type User               = typeof users.$inferSelect;
 export type Route              = typeof routes.$inferSelect;
