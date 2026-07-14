@@ -52,3 +52,5 @@ stack = "FULLSTACK_JS"
 [userenv.shared]
 OSRM_BASE_URL = "http://router.project-osrm.org"
 VITE_MAPBOX_STYLE = "mapbox://styles/anmol-15/cmra6hgfg001h01quhh5j42i4"
+VAPID_PUBLIC_KEY = "BE0U7teDv3RzUfBiPGccSMksjNbBptGICaTkX3LZQXhUK_jRF4v_qlTclA6D1AR8HrYsdIjiE7dgLk699_wi4_E"
+VAPID_PRIVATE_KEY = "EFVAla_HWPwcr0EzNtBl1S6QSQmn7ii5PVCBwCBeVVE"

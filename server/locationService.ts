@@ -299,8 +299,8 @@ export async function checkGeofences(
         const enterTime = stopDwellTimers.get(arrKey);
         if (!enterTime) {
           stopDwellTimers.set(arrKey, Date.now());
-        } else if (Date.now() - enterTime >= DWELL_REQUIRED_MS) {
-          // Confirmed arrival
+        } else if (Date.now() - enterTime >= DWELL_REQUIRED_MS && (!loc.speed || loc.speed <= 8)) {
+          // Confirmed arrival — speed gate (≤8 km/h) prevents drive-by false triggers
           await storage.logGeoEvent({ tripId: loc.tripId, stopId: stop.id, type: "REACHED" });
           stopDwellTimers.delete(arrKey);
 

@@ -1,4 +1,5 @@
 - [GPS Fleet System Architecture](gps-fleet-system.md) — LocationService is source-agnostic; all GPS providers feed through validateLocation() before broadcast.
 - [WebSocket message types](ws-message-types.md) — Full list of WS message types including pause/resume/fleet alerts added in GPS feature build.
-- [Map stack: Mapbox GL JS](map-stack.md) — BusMap migrated to mapbox-gl. GeoJSON source for live bus, exported updateBusPosition(). mapMatching.ts stub created.
+- [Map stack: Mapbox GL JS](map-stack.md) — BusMap migrated to mapbox-gl. GeoJSON source for live bus, exported updateBusPosition(). mapMatching.ts upgraded to Mapbox Map Matching API.
 - [Notification Engine Architecture](notification-engine.md) — 10-stage ETA+geofence notification engine; multi-radius fences; spam protection; student targeting; analytics APIs.
+- [Feature improvements July 2026](feature-improvements-jul2026.md) — 8 improvements: routes from DB, offline detection, arrival speed gate, push notifications PWA, map matching, analytics charts, lazy loading, scheduled timetable.

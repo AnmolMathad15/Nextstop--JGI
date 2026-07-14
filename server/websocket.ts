@@ -63,7 +63,7 @@ const clients          = new Map<WebSocket, ClientInfo>();
 const latestLocations  = new Map<string, ProcessedLocation>();
 const lastUpdateTime   = new Map<string, number>();
 const offlineCheckIntervals = new Map<string, NodeJS.Timeout>();
-const OFFLINE_THRESHOLD_MS  = 15_000;
+const OFFLINE_THRESHOLD_MS  = 30_000; // 30 s — give drivers time to reconnect
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 
@@ -490,11 +490,35 @@ async function emitNotification(
 
 function scheduleOfflineCheck(tripId: string, wss: WebSocketServer, routeId: number) {
   clearOfflineTimer(tripId);
-  const timer = setTimeout(() => {
+  const timer = setTimeout(async () => {
     const last = lastUpdateTime.get(tripId);
     if (!last || Date.now() - last >= OFFLINE_THRESHOLD_MS) {
-      const payload = JSON.stringify({ type: "bus:paused", tripId, routeId });
+      // Broadcast to all route subscribers
+      const payload = JSON.stringify({ type: "bus:offline", tripId, routeId });
       broadcastToRouteAll(wss, routeId, payload);
+
+      // Persist a GPS_OFFLINE fleet alert so admins see it in the dashboard
+      const loc = latestLocations.get(tripId);
+      try {
+        const trip = await storage.getTrip(tripId);
+        if (trip) {
+          await storage.createFleetAlert({
+            tripId,
+            busId:    trip.busId,
+            driverId: trip.driverId,
+            alertType: "GPS_OFFLINE",
+            severity:  "high",
+            lat: loc?.lat,
+            lng: loc?.lng,
+            details: JSON.stringify({
+              lastSeenMs: last ? Date.now() - last : null,
+              routeId,
+            }),
+          });
+        }
+      } catch (err) {
+        console.error("[ws] Failed to persist GPS_OFFLINE alert:", err);
+      }
     }
   }, OFFLINE_THRESHOLD_MS);
   offlineCheckIntervals.set(tripId, timer);

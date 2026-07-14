@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import RibbonBar from "@/components/RibbonBar";
 import AppHeader from "@/components/AppHeader";
 import DriverDashboard from "@/components/DriverDashboard";
-import BusMap from "@/components/BusMap";
 import BottomNavigation from "@/components/BottomNavigation";
+import { Loader2 } from "lucide-react";
+
+const BusMap = lazy(() => import("@/components/BusMap"));
 import NotificationCard from "@/components/NotificationCard";
 import ReportForm from "@/components/ReportForm";
 import TripHistory from "@/components/TripHistory";
@@ -49,7 +51,9 @@ export default function DriverPage({ userName, driverId, assignedBusId, onLogout
       case "routes":
         return (
           <div className="flex-1 relative">
-            <BusMap showAllBuses role="admin" />
+            <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+              <BusMap showAllBuses role="admin" />
+            </Suspense>
           </div>
         );
 

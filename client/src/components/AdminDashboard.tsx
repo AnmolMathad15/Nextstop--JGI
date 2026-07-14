@@ -1,8 +1,10 @@
 import { useState, useCallback } from "react";
 import {
-  Bus, Users, Route, UserCircle, Plus, Pencil, Trash2,
+  Bus, Users, Route, UserCircle, Plus, Trash2,
   Search, MapPin, AlertTriangle, CheckCircle, Clock,
   Bell, ShieldAlert, WifiOff, Gauge, RefreshCw,
+  BarChart2, TrendingUp, Zap, ChevronDown, ChevronRight,
+  ToggleLeft, ToggleRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
+  Dialog, DialogContent, DialogFooter,
   DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,14 +23,30 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useWebSocket, type FleetAlertPayload } from "@/hooks/useWebSocket";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Cell, PieChart, Pie, Legend,
+} from "recharts";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface BusData     { id: string; number: string; capacity: number; isActive: boolean; }
-interface RouteData   { id: number; name: string; displayOrder: number; isActive: boolean; }
+interface RouteData   { id: number; name: string; displayOrder: number; isActive: boolean; color?: string | null; speedLimit?: number | null; }
+interface RouteStop   { id: number; routeId: number; name: string; lat: number; lng: number; scheduledTime: string; sequence: number; isMainStop?: boolean | null; }
 interface DriverData  { id: string; userId: string; licenseNumber: string | null; assignedBusId: string | null; user: { id: string; username: string; name: string | null; phone: string | null } | null; }
 interface StudentData { id: string; userId: string; usn: string; preferredRouteId: number | null; preferredStop: string | null; user: { id: string; username: string; name: string | null } | null; }
 interface AlertData   { id: string; alertType: string; severity: string; tripId?: string; busId?: string; driverId?: string; lat?: number; lng?: number; details?: string; status: string; adminNotes?: string; timestamp: string; }
+interface AnalyticsSummary {
+  delayedStops: { stopName: string; routeId: number; avgDelayMin: number; count: number }[];
+  tripDuration: { avgMinutes: number; totalTrips: number };
+  driverPunctuality: { driverId: string; overspeedCount: number; performanceScore: number; totalDistance: number }[];
+  avgSpeed: { avgSpeedKmh: number };
+  notifStats: { totalSent: number; byType: { type: string; count: number }[] };
+}
 
 interface AdminDashboardProps { onViewLiveMap?: () => void; }
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const ALERT_ICONS: Record<string, React.ReactNode> = {
   OUT_OF_AREA:    <ShieldAlert className="h-4 w-4" />,
@@ -45,16 +63,11 @@ const SEVERITY_STYLES: Record<string, string> = {
   low:    "bg-green-100 text-green-700 border-green-200",
 };
 
-const SEVERITY_DOT: Record<string, string> = {
-  high:   "bg-red-500",
-  medium: "bg-yellow-500",
-  low:    "bg-green-500",
-};
+const PIE_COLORS = ["#3b82f6","#f97316","#22c55e","#ef4444","#8b5cf6","#06b6d4","#f59e0b","#ec4899"];
 
 function formatAlertType(type: string) {
   return type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
-
 function timeAgo(ts: string) {
   const ms = Date.now() - new Date(ts).getTime();
   const s = Math.floor(ms / 1000);
@@ -64,12 +77,18 @@ function timeAgo(ts: string) {
   return `${Math.floor(m / 60)}h ago`;
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
   const [activeTab,       setActiveTab]       = useState("overview");
   const [searchQuery,     setSearchQuery]     = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [dialogType,      setDialogType]      = useState<"bus" | "driver" | "student">("bus");
   const [liveAlerts,      setLiveAlerts]      = useState<FleetAlertPayload[]>([]);
+  const [expandedRoute,   setExpandedRoute]   = useState<number | null>(null);
+  const [isAddStopOpen,   setIsAddStopOpen]   = useState(false);
+  const [addStopRouteId,  setAddStopRouteId]  = useState<number | null>(null);
+  const [newStop,         setNewStop]         = useState({ name: "", lat: "", lng: "", scheduledTime: "", sequence: "" });
 
   const qc = useQueryClient();
 
@@ -82,8 +101,17 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
     queryKey: ["/api/alerts"],
     refetchInterval: 30_000,
   });
+  const { data: analytics } = useQuery<AnalyticsSummary>({
+    queryKey: ["/api/analytics/summary"],
+    refetchInterval: 60_000,
+    enabled: activeTab === "analytics",
+  });
+  const { data: expandedStops = [] } = useQuery<RouteStop[]>({
+    queryKey: [`/api/routes/${expandedRoute}`],
+    enabled: expandedRoute !== null,
+    select: (d: any) => d.stops ?? [],
+  });
 
-  // Receive live fleet alerts via WebSocket
   const handleFleetAlert = useCallback((alert: FleetAlertPayload) => {
     setLiveAlerts(prev => [alert, ...prev.slice(0, 49)]);
     qc.invalidateQueries({ queryKey: ["/api/alerts"] });
@@ -91,13 +119,50 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
 
   useWebSocket({ role: "admin", onFleetAlert: handleFleetAlert });
 
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
   const acknowledgeAlert = useMutation({
     mutationFn: ({ id, status, notes }: { id: string; status: string; notes?: string }) =>
       apiRequest("PATCH", `/api/alerts/${id}`, { status, adminNotes: notes }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/alerts"] }),
   });
 
-  // All alerts: merge live + DB, deduplicate by id
+  const addBus = useMutation({
+    mutationFn: (data: { number: string; capacity: number }) =>
+      apiRequest("POST", "/api/buses", { ...data, isActive: true }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/buses"] }); setIsAddDialogOpen(false); },
+  });
+
+  const deleteBus = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/buses/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/buses"] }),
+  });
+
+  const toggleRoute = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
+      apiRequest("PATCH", `/api/routes/${id}`, { isActive: !isActive }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/routes"] }),
+  });
+
+  const deleteStop = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/route-stops/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/routes/${expandedRoute}`] });
+      qc.invalidateQueries({ queryKey: ["/api/routes"] });
+    },
+  });
+
+  const addStop = useMutation({
+    mutationFn: (stop: any) => apiRequest("POST", "/api/route-stops", stop),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [`/api/routes/${addStopRouteId}`] });
+      setIsAddStopOpen(false);
+      setNewStop({ name: "", lat: "", lng: "", scheduledTime: "", sequence: "" });
+    },
+  });
+
+  // ── Derived state ──────────────────────────────────────────────────────────
+
   const allAlerts = (() => {
     const map = new Map<string, AlertData | FleetAlertPayload>();
     dbAlerts.forEach(a => map.set(a.id, a));
@@ -107,20 +172,26 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
     ) as AlertData[];
   })();
 
-  const activeAlerts = allAlerts.filter(a => a.status === "active");
+  const activeAlerts   = allAlerts.filter(a => a.status === "active");
   const resolvedAlerts = allAlerts.filter(a => a.status !== "active");
 
   const stats = [
-    { label: "Total Buses",        value: buses.length,    icon: Bus,        color: "bg-primary" },
-    { label: "Active Drivers",     value: drivers.length,  icon: UserCircle, color: "bg-blue-500" },
-    { label: "Total Routes",       value: routes.length,   icon: Route,      color: "bg-green-500" },
-    { label: "Registered Students",value: students.length, icon: Users,      color: "bg-yellow-500" },
+    { label: "Total Buses",         value: buses.length,    icon: Bus,        color: "bg-primary" },
+    { label: "Active Drivers",      value: drivers.length,  icon: UserCircle, color: "bg-blue-500" },
+    { label: "Total Routes",        value: routes.length,   icon: Route,      color: "bg-green-500" },
+    { label: "Registered Students", value: students.length, icon: Users,      color: "bg-yellow-500" },
   ];
 
   const openAddDialog = (type: "bus" | "driver" | "student") => {
     setDialogType(type);
     setIsAddDialogOpen(true);
   };
+
+  // ── Bus form state (simple inline) ────────────────────────────────────────
+  const [newBusNumber,   setNewBusNumber]   = useState("");
+  const [newBusCapacity, setNewBusCapacity] = useState("40");
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-6 pb-24">
@@ -170,12 +241,14 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="overview"  data-testid="tab-overview">Overview</TabsTrigger>
-          <TabsTrigger value="buses"     data-testid="tab-buses">Buses</TabsTrigger>
-          <TabsTrigger value="drivers"   data-testid="tab-drivers">Drivers</TabsTrigger>
-          <TabsTrigger value="students"  data-testid="tab-students">Students</TabsTrigger>
-          <TabsTrigger value="alerts"    data-testid="tab-alerts" className="relative">
+        <TabsList className="flex w-full overflow-x-auto gap-1 h-auto flex-wrap">
+          <TabsTrigger value="overview"   data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="buses"      data-testid="tab-buses">Buses</TabsTrigger>
+          <TabsTrigger value="drivers"    data-testid="tab-drivers">Drivers</TabsTrigger>
+          <TabsTrigger value="students"   data-testid="tab-students">Students</TabsTrigger>
+          <TabsTrigger value="routes"     data-testid="tab-routes">Routes</TabsTrigger>
+          <TabsTrigger value="analytics"  data-testid="tab-analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="alerts"     data-testid="tab-alerts" className="relative">
             Alerts
             {activeAlerts.length > 0 && (
               <span className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center text-[10px] font-bold text-white bg-red-500 rounded-full">
@@ -185,7 +258,7 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
           </TabsTrigger>
         </TabsList>
 
-        {/* Overview */}
+        {/* ── Overview ─────────────────────────────────────────────────────── */}
         <TabsContent value="overview" className="space-y-4 mt-4">
           <Card>
             <CardHeader><CardTitle>Routes Overview</CardTitle></CardHeader>
@@ -193,12 +266,16 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
               <div className="grid gap-3">
                 {routes.map(route => (
                   <div key={route.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <div>
-                      <p className="font-medium">{route.name}</p>
-                      <p className="text-sm text-muted-foreground">Order: {route.displayOrder}</p>
+                    <div className="flex items-center gap-3">
+                      {route.color && (
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: route.color }} />
+                      )}
+                      <div>
+                        <p className="font-medium">{route.name}</p>
+                        <p className="text-sm text-muted-foreground">Order: {route.displayOrder}</p>
+                      </div>
                     </div>
-                    <Badge variant={route.isActive ? "default" : "secondary"} className="gap-1">
-                      <Bus className="h-3 w-3" />
+                    <Badge variant={route.isActive ? "default" : "secondary"}>
                       {route.isActive ? "Active" : "Inactive"}
                     </Badge>
                   </div>
@@ -208,14 +285,19 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
           </Card>
         </TabsContent>
 
-        {/* Buses */}
+        {/* ── Buses ────────────────────────────────────────────────────────── */}
         <TabsContent value="buses" className="space-y-4 mt-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search buses..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-9" data-testid="input-search-buses" />
+              <Input
+                placeholder="Search buses…"
+                className="pl-9"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
             </div>
-            <Button onClick={() => openAddDialog("bus")} className="gap-2" data-testid="button-add-bus">
+            <Button className="gap-2" onClick={() => openAddDialog("bus")} data-testid="button-add-bus">
               <Plus className="h-4 w-4" /> Add Bus
             </Button>
           </div>
@@ -230,72 +312,70 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {buses.filter(b => b.number.toLowerCase().includes(searchQuery.toLowerCase())).map(bus => (
-                  <TableRow key={bus.id} data-testid={`row-bus-${bus.id}`}>
-                    <TableCell className="font-medium">{bus.number}</TableCell>
-                    <TableCell>{bus.capacity} seats</TableCell>
-                    <TableCell><Badge variant={bus.isActive ? "default" : "secondary"}>{bus.isActive ? "Active" : "Inactive"}</Badge></TableCell>
-                    <TableCell className="text-right">
-                      <Button size="icon" variant="ghost" data-testid={`button-edit-bus-${bus.id}`}><Pencil className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" className="text-destructive" data-testid={`button-delete-bus-${bus.id}`}><Trash2 className="h-4 w-4" /></Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {buses
+                  .filter(b => b.number.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .map(bus => (
+                    <TableRow key={bus.id}>
+                      <TableCell className="font-medium">{bus.number}</TableCell>
+                      <TableCell>{bus.capacity}</TableCell>
+                      <TableCell>
+                        <Badge variant={bus.isActive ? "default" : "secondary"}>
+                          {bus.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost" size="icon"
+                          onClick={() => deleteBus.mutate(bus.id)}
+                          data-testid={`button-delete-bus-${bus.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           </Card>
         </TabsContent>
 
-        {/* Drivers */}
+        {/* ── Drivers ──────────────────────────────────────────────────────── */}
         <TabsContent value="drivers" className="space-y-4 mt-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search drivers..." className="pl-9" data-testid="input-search-drivers" />
+              <Input placeholder="Search drivers…" className="pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
             </div>
-            <Button onClick={() => openAddDialog("driver")} className="gap-2" data-testid="button-add-driver">
-              <Plus className="h-4 w-4" /> Add Driver
-            </Button>
           </div>
           <Card>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Driver ID</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Phone</TableHead>
                   <TableHead>License</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {drivers.map(driver => (
-                  <TableRow key={driver.id} data-testid={`row-driver-${driver.id}`}>
-                    <TableCell className="font-medium">{driver.id.slice(0, 8)}…</TableCell>
-                    <TableCell>{driver.user?.name || driver.user?.username || "N/A"}</TableCell>
-                    <TableCell>{driver.user?.phone || "N/A"}</TableCell>
-                    <TableCell>{driver.licenseNumber || "N/A"}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="icon" variant="ghost"><Pencil className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" className="text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {drivers
+                  .filter(d => (d.user?.name ?? d.user?.username ?? "").toLowerCase().includes(searchQuery.toLowerCase()))
+                  .map(driver => (
+                    <TableRow key={driver.id}>
+                      <TableCell className="font-medium">{driver.user?.name ?? driver.user?.username ?? "—"}</TableCell>
+                      <TableCell>{driver.user?.phone ?? "—"}</TableCell>
+                      <TableCell>{driver.licenseNumber ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           </Card>
         </TabsContent>
 
-        {/* Students */}
+        {/* ── Students ─────────────────────────────────────────────────────── */}
         <TabsContent value="students" className="space-y-4 mt-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search students by USN…" className="pl-9" data-testid="input-search-students" />
-            </div>
-            <Button onClick={() => openAddDialog("student")} className="gap-2" data-testid="button-add-student">
-              <Plus className="h-4 w-4" /> Add Student
-            </Button>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search students…" className="pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
           <Card>
             <Table>
@@ -304,217 +384,334 @@ export default function AdminDashboard({ onViewLiveMap }: AdminDashboardProps) {
                   <TableHead>USN</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Preferred Stop</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {students.map(student => (
-                  <TableRow key={student.id} data-testid={`row-student-${student.usn}`}>
-                    <TableCell className="font-medium">{student.usn}</TableCell>
-                    <TableCell>{student.user?.name || student.user?.username || "N/A"}</TableCell>
-                    <TableCell>{student.preferredStop || "Not set"}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="icon" variant="ghost"><Pencil className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" className="text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {students
+                  .filter(s => (s.usn + (s.user?.name ?? "")).toLowerCase().includes(searchQuery.toLowerCase()))
+                  .map(s => (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-mono text-sm">{s.usn}</TableCell>
+                      <TableCell>{s.user?.name ?? "—"}</TableCell>
+                      <TableCell>{s.preferredStop ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           </Card>
         </TabsContent>
 
-        {/* ── Fleet Alert Center ─────────────────────────────────────────── */}
-        <TabsContent value="alerts" className="space-y-4 mt-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold text-lg">Fleet Alert Center</h3>
-              <p className="text-sm text-muted-foreground">Real-time safety & operational alerts</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => refetchAlerts()} className="gap-2">
-              <RefreshCw className="h-4 w-4" /> Refresh
-            </Button>
-          </div>
-
-          {/* Summary chips */}
-          <div className="flex gap-2 flex-wrap">
-            {(["high", "medium", "low"] as const).map(sev => {
-              const count = activeAlerts.filter(a => a.severity === sev).length;
-              return (
-                <div key={sev} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border ${SEVERITY_STYLES[sev]}`}>
-                  <div className={`h-2 w-2 rounded-full ${SEVERITY_DOT[sev]}`} />
-                  {sev.charAt(0).toUpperCase() + sev.slice(1)}: {count}
+        {/* ── Routes management ────────────────────────────────────────────── */}
+        <TabsContent value="routes" className="space-y-4 mt-4">
+          <p className="text-sm text-muted-foreground">
+            Toggle routes active/inactive and manage stops. Changes take effect immediately for drivers and students.
+          </p>
+          {routes.map(route => (
+            <Card key={route.id}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    {route.color && <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: route.color }} />}
+                    <CardTitle className="text-base">{route.name}</CardTitle>
+                    <Badge variant={route.isActive ? "default" : "secondary"} className="text-xs">
+                      {route.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={() => toggleRoute.mutate({ id: route.id, isActive: route.isActive ?? true })}
+                      className="gap-1 text-xs"
+                    >
+                      {route.isActive ? <ToggleRight className="h-4 w-4 text-green-500" /> : <ToggleLeft className="h-4 w-4" />}
+                      {route.isActive ? "Deactivate" : "Activate"}
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={() => setExpandedRoute(expandedRoute === route.id ? null : route.id)}
+                      className="gap-1 text-xs"
+                    >
+                      {expandedRoute === route.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      Stops
+                    </Button>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Active alerts */}
-          {activeAlerts.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <CheckCircle className="h-10 w-10 mx-auto text-green-500 mb-3" />
-                <p className="font-semibold text-gray-700">All Clear</p>
-                <p className="text-sm text-muted-foreground">No active alerts at this time.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {activeAlerts.map(alert => {
-                let details: Record<string, unknown> = {};
-                try { details = alert.details ? JSON.parse(alert.details) : {}; } catch {}
-                return (
-                  <Card key={alert.id} className={`border-l-4 ${alert.severity === "high" ? "border-l-red-500" : alert.severity === "medium" ? "border-l-yellow-500" : "border-l-green-500"}`} data-testid={`alert-card-${alert.id}`}>
-                    <CardContent className="pt-4 pb-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div className={`p-2 rounded-lg flex-shrink-0 ${SEVERITY_STYLES[alert.severity]}`}>
-                            {ALERT_ICONS[alert.alertType] || <AlertTriangle className="h-4 w-4" />}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-semibold text-gray-900">{formatAlertType(alert.alertType)}</p>
-                              <Badge variant="outline" className={`text-xs ${SEVERITY_STYLES[alert.severity]}`}>
-                                {alert.severity.toUpperCase()}
-                              </Badge>
-                            </div>
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                              <Clock className="h-3 w-3" />
-                              {timeAgo(alert.timestamp)}
-                              {alert.tripId && <> · Trip: {alert.tripId.slice(0, 8)}…</>}
-                            </div>
-                            {Object.keys(details).length > 0 && (
-                              <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded p-2 space-y-0.5">
-                                {Object.entries(details).slice(0, 4).map(([k, v]) => (
-                                  <div key={k} className="flex gap-1">
-                                    <span className="font-medium capitalize">{k.replace(/([A-Z])/g, " $1")}:</span>
-                                    <span>{String(v)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {alert.lat && alert.lng && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                📍 {alert.lat.toFixed(5)}, {alert.lng.toFixed(5)}
-                              </p>
-                            )}
-                          </div>
+              </CardHeader>
+              {expandedRoute === route.id && (
+                <CardContent>
+                  <div className="space-y-1 mb-3">
+                    {expandedStops.map((stop, i) => (
+                      <div key={stop.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground w-5">{i + 1}.</span>
+                          <span>{stop.name}</span>
+                          {stop.isMainStop && <Badge variant="outline" className="text-[10px] h-4">Major</Badge>}
                         </div>
-                        <div className="flex flex-col gap-1 flex-shrink-0">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-muted-foreground">{stop.scheduledTime}</span>
                           <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs h-7"
-                            onClick={() => acknowledgeAlert.mutate({ id: alert.id, status: "acknowledged" })}
-                            disabled={acknowledgeAlert.isPending}
-                            data-testid={`button-acknowledge-${alert.id}`}
+                            variant="ghost" size="icon" className="h-6 w-6"
+                            onClick={() => deleteStop.mutate(stop.id)}
                           >
-                            Acknowledge
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="text-xs h-7 bg-green-500 hover:bg-green-600 text-white"
-                            onClick={() => acknowledgeAlert.mutate({ id: alert.id, status: "resolved" })}
-                            disabled={acknowledgeAlert.isPending}
-                            data-testid={`button-resolve-${alert.id}`}
-                          >
-                            Resolve
+                            <Trash2 className="h-3 w-3 text-destructive" />
                           </Button>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
+                    ))}
+                    {expandedStops.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">No stops found.</p>
+                    )}
+                  </div>
+                  <Button
+                    size="sm" variant="outline" className="gap-1 text-xs w-full"
+                    onClick={() => { setAddStopRouteId(route.id); setIsAddStopOpen(true); }}
+                  >
+                    <Plus className="h-3 w-3" /> Add Stop
+                  </Button>
+                </CardContent>
+              )}
+            </Card>
+          ))}
+        </TabsContent>
+
+        {/* ── Analytics ────────────────────────────────────────────────────── */}
+        <TabsContent value="analytics" className="space-y-4 mt-4">
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 rounded-lg"><Clock className="h-5 w-5 text-blue-600" /></div>
+                  <div>
+                    <p className="text-2xl font-bold">{Math.round(analytics?.tripDuration?.avgMinutes ?? 0)}<span className="text-sm font-normal text-muted-foreground ml-1">min</span></p>
+                    <p className="text-xs text-muted-foreground">Avg Trip Duration</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-green-100 rounded-lg"><Gauge className="h-5 w-5 text-green-600" /></div>
+                  <div>
+                    <p className="text-2xl font-bold">{(analytics?.avgSpeed?.avgSpeedKmh ?? 0).toFixed(1)}<span className="text-sm font-normal text-muted-foreground ml-1">km/h</span></p>
+                    <p className="text-xs text-muted-foreground">Fleet Avg Speed</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-5">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-100 rounded-lg"><Bell className="h-5 w-5 text-purple-600" /></div>
+                  <div>
+                    <p className="text-2xl font-bold">{analytics?.notifStats?.totalSent ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">Notifications Sent</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Notification breakdown */}
+          {(analytics?.notifStats?.byType?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><BarChart2 className="h-4 w-4" />Notification Types</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={analytics!.notifStats.byType} margin={{ top: 0, right: 0, left: -20, bottom: 60 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="type" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Bar dataKey="count" radius={[4,4,0,0]}>
+                      {analytics!.notifStats.byType.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
           )}
 
-          {/* Resolved history */}
-          {resolvedAlerts.length > 0 && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium text-muted-foreground select-none">
-                Alert History ({resolvedAlerts.length} resolved)
-              </summary>
-              <div className="mt-3 space-y-2">
-                {resolvedAlerts.slice(0, 10).map(alert => (
-                  <div key={alert.id} className="flex items-center gap-3 p-3 bg-muted rounded-lg opacity-70" data-testid={`alert-resolved-${alert.id}`}>
-                    <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{formatAlertType(alert.alertType)}</p>
-                      <p className="text-xs text-muted-foreground">{timeAgo(alert.timestamp)} · {alert.status}</p>
-                    </div>
-                    <Badge variant="secondary" className="text-xs">{alert.severity}</Badge>
-                  </div>
-                ))}
-              </div>
-            </details>
+          {/* Driver performance */}
+          {(analytics?.driverPunctuality?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Driver Performance Scores</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={analytics!.driverPunctuality.slice(0, 10)} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="driverId" tick={{ fontSize: 10 }} tickFormatter={v => v.slice(0,6) + "…"} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(v: any, name: string) => [v, name === "performanceScore" ? "Score" : name]} />
+                    <Bar dataKey="performanceScore" fill="#3b82f6" radius={[4,4,0,0]} name="Score" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
           )}
+
+          {/* Most delayed stops */}
+          {(analytics?.delayedStops?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Most Delayed Stops</CardTitle></CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {analytics!.delayedStops.slice(0, 5).map((s, i) => (
+                    <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded bg-muted text-sm">
+                      <span className="font-medium">{s.stopName}</span>
+                      <Badge variant="outline" className="text-xs">
+                        +{s.avgDelayMin.toFixed(1)} min avg
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!analytics && (
+            <div className="text-center py-12 text-muted-foreground">
+              <BarChart2 className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p>Analytics data will appear after buses complete trips.</p>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── Alerts ───────────────────────────────────────────────────────── */}
+        <TabsContent value="alerts" className="space-y-4 mt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold">Fleet Alert Center</h3>
+              <p className="text-sm text-muted-foreground">{activeAlerts.length} active · {resolvedAlerts.length} resolved</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => refetchAlerts()} className="gap-1">
+              <RefreshCw className="h-3 w-3" /> Refresh
+            </Button>
+          </div>
+          <div className="space-y-3">
+            {allAlerts.map(alert => (
+              <Card key={alert.id} className={`border ${SEVERITY_STYLES[alert.severity] ?? ""}`}>
+                <CardContent className="pt-4 pb-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5">{ALERT_ICONS[alert.alertType] ?? <AlertTriangle className="h-4 w-4" />}</div>
+                      <div>
+                        <p className="font-medium text-sm">{formatAlertType(alert.alertType)}</p>
+                        <p className="text-xs text-muted-foreground">{timeAgo(alert.timestamp)}</p>
+                        {alert.details && (
+                          <p className="text-xs mt-1 opacity-70 line-clamp-1">{alert.details}</p>
+                        )}
+                      </div>
+                    </div>
+                    {alert.status === "active" && (
+                      <Button
+                        size="sm" variant="outline" className="shrink-0 text-xs h-7"
+                        onClick={() => acknowledgeAlert.mutate({ id: alert.id, status: "acknowledged" })}
+                      >
+                        Acknowledge
+                      </Button>
+                    )}
+                    {alert.status === "acknowledged" && (
+                      <Button
+                        size="sm" variant="default" className="shrink-0 text-xs h-7"
+                        onClick={() => acknowledgeAlert.mutate({ id: alert.id, status: "resolved" })}
+                      >
+                        Resolve
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {allAlerts.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                <p>No alerts — fleet is operating normally.</p>
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
 
-      {/* Add Dialog */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+      {/* ── Add Bus dialog ─────────────────────────────────────────────────── */}
+      <Dialog open={isAddDialogOpen && dialogType === "bus"} onOpenChange={setIsAddDialogOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add New {dialogType.charAt(0).toUpperCase() + dialogType.slice(1)}</DialogTitle>
-            <DialogDescription>Fill in the details to add a new {dialogType} to the system.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            {dialogType === "bus" && (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="bus-number">Bus Number</Label>
-                  <Input id="bus-number" placeholder="KA-25-X-0000" data-testid="input-new-bus-number" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="bus-capacity">Capacity</Label>
-                  <Input id="bus-capacity" type="number" placeholder="40" defaultValue={40} />
-                </div>
-              </>
-            )}
-            {dialogType === "driver" && (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="driver-name">Name</Label>
-                  <Input id="driver-name" placeholder="Full name" data-testid="input-new-driver-name" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="driver-phone">Phone</Label>
-                  <Input id="driver-phone" placeholder="+91 XXXXXXXXXX" data-testid="input-new-driver-phone" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="driver-license">License Number</Label>
-                  <Input id="driver-license" placeholder="KA-XX-XXXXX" />
-                </div>
-              </>
-            )}
-            {dialogType === "student" && (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="student-usn">USN</Label>
-                  <Input id="student-usn" placeholder="2JI20XX000" data-testid="input-new-student-usn" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="student-name">Name</Label>
-                  <Input id="student-name" placeholder="Full name" data-testid="input-new-student-name" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="student-route">Preferred Route</Label>
-                  <Select>
-                    <SelectTrigger><SelectValue placeholder="Select route" /></SelectTrigger>
-                    <SelectContent>
-                      {routes.map(route => (
-                        <SelectItem key={route.id} value={route.id.toString()}>{route.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
+          <DialogHeader><DialogTitle>Add Bus</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Bus Number / Plate</Label>
+              <Input placeholder="KA-25-F-1234" value={newBusNumber} onChange={e => setNewBusNumber(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Capacity</Label>
+              <Input type="number" placeholder="40" value={newBusCapacity} onChange={e => setNewBusCapacity(e.target.value)} />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => setIsAddDialogOpen(false)} data-testid={`button-save-${dialogType}`}>Save</Button>
+            <Button
+              onClick={() => addBus.mutate({ number: newBusNumber, capacity: parseInt(newBusCapacity) || 40 })}
+              disabled={!newBusNumber.trim() || addBus.isPending}
+            >
+              {addBus.isPending ? "Saving…" : "Add Bus"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Stop dialog ────────────────────────────────────────────────── */}
+      <Dialog open={isAddStopOpen} onOpenChange={setIsAddStopOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Stop</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label>Stop Name</Label>
+              <Input placeholder="e.g. Old Bus Stand" value={newStop.name} onChange={e => setNewStop(s => ({ ...s, name: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Latitude</Label>
+                <Input placeholder="15.3512" value={newStop.lat} onChange={e => setNewStop(s => ({ ...s, lat: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Longitude</Label>
+                <Input placeholder="75.1421" value={newStop.lng} onChange={e => setNewStop(s => ({ ...s, lng: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Scheduled Time</Label>
+                <Input placeholder="07:30" value={newStop.scheduledTime} onChange={e => setNewStop(s => ({ ...s, scheduledTime: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>Sequence #</Label>
+                <Input type="number" placeholder="1" value={newStop.sequence} onChange={e => setNewStop(s => ({ ...s, sequence: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddStopOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!addStopRouteId || !newStop.name || !newStop.lat || !newStop.lng) return;
+                addStop.mutate({
+                  routeId: addStopRouteId,
+                  name: newStop.name,
+                  lat: parseFloat(newStop.lat),
+                  lng: parseFloat(newStop.lng),
+                  scheduledTime: newStop.scheduledTime || "00:00",
+                  sequence: parseInt(newStop.sequence) || 99,
+                  isMainStop: false,
+                  radius: 0.1,
+                });
+              }}
+              disabled={addStop.isPending}
+            >
+              {addStop.isPending ? "Saving…" : "Add Stop"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

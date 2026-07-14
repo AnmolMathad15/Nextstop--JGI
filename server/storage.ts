@@ -2,13 +2,14 @@ import { eq, desc, and, sql as drizzleSql, avg, count } from "drizzle-orm";
 import { db } from "./db";
 import {
   users, routes, routeStops, buses, drivers, students, trips, liveLocations,
-  geoEvents, driverStats, fleetAlerts, notifications,
+  geoEvents, driverStats, fleetAlerts, notifications, schedules, pushSubscriptions,
   type User, type InsertUser, type Route, type InsertRoute,
   type RouteStop, type InsertRouteStop, type Bus, type InsertBus,
   type Driver, type InsertDriver, type Student, type InsertStudent,
   type Trip, type InsertTrip, type LiveLocation, type InsertLiveLocation,
   type GeoEvent, type InsertGeoEvent, type DriverStats, type InsertDriverStats,
   type FleetAlert, type InsertFleetAlert, type Notification, type InsertNotification,
+  type Schedule, type InsertSchedule, type PushSubscription, type InsertPushSubscription,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -19,8 +20,10 @@ export interface IStorage {
   getRoutes(): Promise<Route[]>;
   getRoute(id: number): Promise<Route | undefined>;
   createRoute(route: InsertRoute): Promise<Route>;
+  updateRoute(id: number, data: Partial<InsertRoute>): Promise<Route | undefined>;
   getRouteStops(routeId: number): Promise<RouteStop[]>;
   createRouteStop(stop: InsertRouteStop): Promise<RouteStop>;
+  deleteRouteStop(id: number): Promise<void>;
 
   getBuses(): Promise<Bus[]>;
   getBus(id: string): Promise<Bus | undefined>;
@@ -73,6 +76,17 @@ export interface IStorage {
   getAnalyticsDriverPunctuality(): Promise<{ driverId: string; overspeedCount: number; performanceScore: number; totalDistance: number }[]>;
   getAnalyticsAvgSpeed(): Promise<{ avgSpeedKmh: number }>;
   getAnalyticsNotificationStats(): Promise<{ totalSent: number; byType: { type: string; count: number }[] }>;
+
+  // Schedules
+  getSchedules(routeId?: number): Promise<Schedule[]>;
+  createSchedule(s: InsertSchedule): Promise<Schedule>;
+  updateSchedule(id: number, data: Partial<InsertSchedule>): Promise<Schedule | undefined>;
+  deleteSchedule(id: number): Promise<void>;
+
+  // Push subscriptions
+  getPushSubscriptions(userId?: string): Promise<PushSubscription[]>;
+  createPushSubscription(sub: InsertPushSubscription): Promise<PushSubscription>;
+  deletePushSubscription(endpoint: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -105,6 +119,11 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateRoute(id: number, data: Partial<InsertRoute>): Promise<Route | undefined> {
+    const [updated] = await db.update(routes).set(data).where(eq(routes.id, id)).returning();
+    return updated;
+  }
+
   async getRouteStops(routeId: number): Promise<RouteStop[]> {
     return db.select().from(routeStops)
       .where(eq(routeStops.routeId, routeId))
@@ -114,6 +133,10 @@ export class DatabaseStorage implements IStorage {
   async createRouteStop(stop: InsertRouteStop): Promise<RouteStop> {
     const [created] = await db.insert(routeStops).values(stop).returning();
     return created;
+  }
+
+  async deleteRouteStop(id: number): Promise<void> {
+    await db.delete(routeStops).where(eq(routeStops.id, id));
   }
 
   async getBuses(): Promise<Bus[]> {
@@ -412,6 +435,54 @@ export class DatabaseStorage implements IStorage {
     const byType = (rows.rows as { type: string; count: number }[]);
     const totalSent = byType.reduce((s, r) => s + r.count, 0);
     return { totalSent, byType };
+  }
+  // ── Schedules ──────────────────────────────────────────────────────────────
+
+  async getSchedules(routeId?: number): Promise<Schedule[]> {
+    if (routeId !== undefined) {
+      return db.select().from(schedules)
+        .where(eq(schedules.routeId, routeId))
+        .orderBy(schedules.departureTime);
+    }
+    return db.select().from(schedules).orderBy(schedules.routeId, schedules.departureTime);
+  }
+
+  async createSchedule(s: InsertSchedule): Promise<Schedule> {
+    const [created] = await db.insert(schedules).values(s).returning();
+    return created;
+  }
+
+  async updateSchedule(id: number, data: Partial<InsertSchedule>): Promise<Schedule | undefined> {
+    const [updated] = await db.update(schedules).set(data).where(eq(schedules.id, id)).returning();
+    return updated;
+  }
+
+  async deleteSchedule(id: number): Promise<void> {
+    await db.delete(schedules).where(eq(schedules.id, id));
+  }
+
+  // ── Push subscriptions ─────────────────────────────────────────────────────
+
+  async getPushSubscriptions(userId?: string): Promise<PushSubscription[]> {
+    if (userId) {
+      return db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, userId));
+    }
+    return db.select().from(pushSubscriptions);
+  }
+
+  async createPushSubscription(sub: InsertPushSubscription): Promise<PushSubscription> {
+    const [created] = await db.insert(pushSubscriptions)
+      .values(sub)
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: { p256dh: sub.p256dh, auth: sub.auth, userId: sub.userId },
+      })
+      .returning();
+    return created;
+  }
+
+  async deletePushSubscription(endpoint: string): Promise<void> {
+    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
   }
 }
 

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import RibbonBar from "@/components/RibbonBar";
 import AppHeader from "@/components/AppHeader";
 import AdminDashboard from "@/components/AdminDashboard";
-import BusMap from "@/components/BusMap";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
+
+const BusMap = lazy(() => import("@/components/BusMap"));
 import backgroundImage from "@assets/jcet logo pic_1764501988672.jpg";
 
 interface AdminPageProps {
@@ -30,7 +31,9 @@ export default function AdminPage({ userName, onLogout }: AdminPageProps) {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <BusMap showAllBuses role="admin" />
+          <Suspense fallback={<div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+            <BusMap showAllBuses role="admin" />
+          </Suspense>
         </div>
       </div>
     );

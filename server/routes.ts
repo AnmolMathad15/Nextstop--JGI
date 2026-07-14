@@ -2,7 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { setupWebSocket, getActiveLocations } from "./websocket";
-import { insertUserSchema, insertBusSchema, insertRouteSchema, insertRouteStopSchema } from "@shared/schema";
+import { insertUserSchema, insertBusSchema, insertRouteSchema, insertRouteStopSchema, insertScheduleSchema } from "@shared/schema";
 import { z } from "zod";
 
 // ─── GPS coordinates for Hubballi-Dharwad stops ───────────────────────────────
@@ -179,6 +179,22 @@ async function seedDatabase() {
         await storage.createStudent({ userId: studentUser.id, usn: "2JH23CS001", preferredRouteId: routes[0].id, preferredStop: "keshwapur circle" });
       }
       console.log("Demo users created!");
+    }
+    // Seed schedules (runs even if routes already existed)
+    const existingSchedules = await storage.getSchedules();
+    if (existingSchedules.length === 0) {
+      const allRoutes = await storage.getRoutes();
+      for (const route of allRoutes) {
+        const stops = await storage.getRouteStops(route.id);
+        if (stops.length === 0) continue;
+        const morningTime = stops[0].scheduledTime;
+        const lateTime    = stops[0].time1015am;
+        await storage.createSchedule({ routeId: route.id, label: "Morning Batch",    departureTime: morningTime,    daysOfWeek: "mon-sat", isActive: true });
+        if (lateTime) {
+          await storage.createSchedule({ routeId: route.id, label: "10:15 AM Batch", departureTime: lateTime,       daysOfWeek: "mon-sat", isActive: true });
+        }
+      }
+      console.log("Schedules seeded!");
     }
   } catch (error) {
     console.error("Seeding error:", error);
@@ -549,6 +565,122 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Analytics summary error:", error);
       res.status(500).json({ error: "Failed to fetch analytics summary" });
+    }
+  });
+
+  // ── Route management (admin) ────────────────────────────────────────────────
+
+  app.patch("/api/routes/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updated = await storage.updateRoute(id, req.body);
+      if (!updated) return res.status(404).json({ error: "Route not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update route" });
+    }
+  });
+
+  app.post("/api/route-stops", async (req, res) => {
+    try {
+      const stop = insertRouteStopSchema.parse(req.body);
+      const created = await storage.createRouteStop(stop);
+      res.status(201).json(created);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid stop data" });
+    }
+  });
+
+  app.delete("/api/route-stops/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteRouteStop(id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete stop" });
+    }
+  });
+
+  // ── Schedules ─────────────────────────────────────────────────────────────
+
+  app.get("/api/schedules", async (req, res) => {
+    try {
+      const routeId = req.query.routeId ? parseInt(req.query.routeId as string) : undefined;
+      const data = await storage.getSchedules(routeId);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch schedules" });
+    }
+  });
+
+  app.post("/api/schedules", async (req, res) => {
+    try {
+      const s = insertScheduleSchema.parse(req.body);
+      const created = await storage.createSchedule(s);
+      res.status(201).json(created);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid schedule data" });
+    }
+  });
+
+  app.patch("/api/schedules/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updated = await storage.updateSchedule(id, req.body);
+      if (!updated) return res.status(404).json({ error: "Schedule not found" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update schedule" });
+    }
+  });
+
+  app.delete("/api/schedules/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteSchedule(id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete schedule" });
+    }
+  });
+
+  // ── Push notifications ─────────────────────────────────────────────────────
+
+  app.get("/api/push/vapid-key", (_req, res) => {
+    const publicKey = process.env.VAPID_PUBLIC_KEY;
+    if (!publicKey) return res.status(503).json({ error: "Push not configured" });
+    res.json({ publicKey });
+  });
+
+  app.post("/api/push/subscribe", async (req, res) => {
+    try {
+      const { userId, subscription } = req.body as {
+        userId: string;
+        subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
+      };
+      if (!userId || !subscription?.endpoint) {
+        return res.status(400).json({ error: "userId and subscription required" });
+      }
+      const saved = await storage.createPushSubscription({
+        userId,
+        endpoint: subscription.endpoint,
+        p256dh:   subscription.keys.p256dh,
+        auth:     subscription.keys.auth,
+      });
+      res.status(201).json({ id: saved.id });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save subscription" });
+    }
+  });
+
+  app.delete("/api/push/subscribe", async (req, res) => {
+    try {
+      const { endpoint } = req.body as { endpoint: string };
+      if (!endpoint) return res.status(400).json({ error: "endpoint required" });
+      await storage.deletePushSubscription(endpoint);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to remove subscription" });
     }
   });
 

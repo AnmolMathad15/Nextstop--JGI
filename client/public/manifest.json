@@ -1,0 +1,16 @@
+{
+  "name": "NextStop JGI",
+  "short_name": "NextStop",
+  "description": "Real-time college bus tracking for JCET Hubballi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/favicon.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/favicon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["transportation", "education"],
+  "lang": "en"
+}
