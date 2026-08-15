@@ -33,6 +33,7 @@ export default defineConfig({
   build: {
     outDir:      path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    target:      "esnext",
     rollupOptions: {
       output: {
         manualChunks: {
@@ -41,6 +42,15 @@ export default defineConfig({
         },
       },
     },
+  },
+  optimizeDeps: {
+    // esbuild 0.28 no longer downlevels destructuring for the browser
+    // targets Vite 6 derives from browserslist. Keep dependency pre-bundling
+    // on modern syntax and leave Mapbox's already-browser-ready bundle alone.
+    esbuildOptions: {
+      target: "esnext",
+    },
+    exclude: ["mapbox-gl"],
   },
   server: {
     fs: {
