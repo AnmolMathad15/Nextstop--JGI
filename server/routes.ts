@@ -162,23 +162,46 @@ async function seedDatabase() {
       console.log("Buses seeded successfully!");
     }
 
+    // Ensure each demo account independently. A partially seeded database
+    // should not make the driver or student account disappear just because
+    // the admin account already existed.
     const existingAdmin = await storage.getUserByUsername("admin");
-    if (!existingAdmin) {
-      console.log("Creating demo users...");
-      await storage.createUser({ username: "admin", password: "admin123", role: "admin", name: "Admin User" });
-      
-      const driverUser = await storage.createUser({ username: "driver1", password: "driver123", role: "driver", name: "Ravi Patil", phone: "+91 9876543210" });
-      const buses = await storage.getBuses();
-      if (buses.length > 0) {
-        await storage.createDriver({ userId: driverUser.id, licenseNumber: "KA25-DL-12345", assignedBusId: buses[0].id });
-      }
+    const adminUser = existingAdmin ?? await storage.createUser({
+      username: "admin", password: "admin123", role: "admin", name: "Admin User",
+    });
 
-      const studentUser = await storage.createUser({ username: "2JH23CS001", password: "student123", role: "student", name: "Rahul Kumar" });
-      const routes = await storage.getRoutes();
-      if (routes.length > 0) {
-        await storage.createStudent({ userId: studentUser.id, usn: "2JH23CS001", preferredRouteId: routes[0].id, preferredStop: "keshwapur circle" });
-      }
-      console.log("Demo users created!");
+    const existingDriverUser = await storage.getUserByUsername("driver1");
+    const driverUser = existingDriverUser ?? await storage.createUser({
+      username: "driver1", password: "driver123", role: "driver",
+      name: "Ravi Patil", phone: "+91 9876543210",
+    });
+    const buses = await storage.getBuses();
+    const existingDriver = await storage.getDriverByUserId(driverUser.id);
+    if (!existingDriver && buses.length > 0) {
+      await storage.createDriver({
+        userId: driverUser.id,
+        licenseNumber: "KA25-DL-12345",
+        assignedBusId: buses[0].id,
+      });
+    }
+
+    const existingStudentUser = await storage.getUserByUsername("2JH23CS001");
+    const studentUser = existingStudentUser ?? await storage.createUser({
+      username: "2JH23CS001", password: "student123", role: "student",
+      name: "Rahul Kumar",
+    });
+    const routes = await storage.getRoutes();
+    const existingStudent = await storage.getStudentByUserId(studentUser.id);
+    if (!existingStudent && routes.length > 0) {
+      await storage.createStudent({
+        userId: studentUser.id,
+        usn: "2JH23CS001",
+        preferredRouteId: routes[0].id,
+        preferredStop: "keshwapur circle",
+      });
+    }
+    if (!existingAdmin || !existingDriverUser || !existingStudentUser) {
+      console.log("Demo users verified.");
     }
     // Seed schedules (runs even if routes already existed)
     const existingSchedules = await storage.getSchedules();
@@ -207,7 +230,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { username, password, role } = req.body;
+      const username = typeof req.body.username === "string"
+        ? req.body.username.trim()
+        : "";
+      const { password, role } = req.body;
       
       const user = await storage.getUserByUsername(username);
       if (!user || user.password !== password) {

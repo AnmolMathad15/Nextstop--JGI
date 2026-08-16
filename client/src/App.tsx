@@ -23,11 +23,11 @@ function AppContent() {
     try {
       const success = await login(username, password, role);
       if (!success) {
-        toast({
-          title: "Login Failed",
-          description: "Invalid credentials or unauthorized role. Try: admin/admin123, driver1/driver123, or 2JI20CS001/student123",
-          variant: "destructive",
-        });
+          toast({
+            title: "Login Failed",
+            description: "Invalid credentials or unauthorized role. Try the demo buttons below the form.",
+            variant: "destructive",
+          });
       }
     } finally {
       setIsLoading(false);

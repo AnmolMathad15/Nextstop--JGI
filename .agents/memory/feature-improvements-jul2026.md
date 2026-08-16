@@ -59,3 +59,11 @@ description: 8 improvements added to NextStop JGI — routes from DB, offline de
 - BottomNavigation student tabs: map, routes, schedule, alerts, settings (5 items)
 - VAPID keys generated: stored in Replit env vars, must also be set in Vercel env vars for push to work in prod
 - Mapbox token reused server-side as `process.env.VITE_MAPBOX_TOKEN` — already a Replit secret
+
+## Authentication seed resilience
+
+Demo users and their driver/student profiles are verified independently during startup rather than behind one admin-account existence check.
+
+**Why:** A partially seeded database can contain the admin row while missing another demo account, making valid demo credentials fail.
+
+**How to apply:** When adding seeded demo data, repair each account/profile independently and normalize usernames before lookup.
